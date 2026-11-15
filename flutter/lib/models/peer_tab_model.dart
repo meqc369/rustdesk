@@ -110,7 +110,8 @@ class PeerTabModel with ChangeNotifier {
     }
     // init currentTab
     _currentTab =
-        int.tryParse(bind.getLocalFlutterOption(k: kOptionPeerTabIndex)) ?? 0;
+        int.tryParse(bind.getLocalFlutterOption(k: kOptionPeerTabIndex)) ??
+            PeerTabIndex.ab.index;
     if (_currentTab < 0 || _currentTab >= maxTabCount) {
       _currentTab = 0;
     }

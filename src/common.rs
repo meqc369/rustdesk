@@ -2521,6 +2521,15 @@ fn apply_qianchen_defaults() {
         defaults.entry(k.to_owned()).or_insert_with(|| v.to_owned());
     }
     drop(defaults);
+    // Official updates would replace this build and drop the settings above.
+    config::OVERWRITE_SETTINGS
+        .write()
+        .unwrap()
+        .insert(keys::OPTION_ALLOW_AUTO_UPDATE.to_owned(), "N".to_owned());
+    config::OVERWRITE_LOCAL_SETTINGS
+        .write()
+        .unwrap()
+        .insert(keys::OPTION_ENABLE_CHECK_UPDATE.to_owned(), "N".to_owned());
     // The API is served on https://...:21114; without this the port is stripped.
     config::BUILTIN_SETTINGS
         .write()

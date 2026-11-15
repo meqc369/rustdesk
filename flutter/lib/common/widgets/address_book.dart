@@ -816,6 +816,45 @@ class AddressBookTag extends StatelessWidget {
     );
   }
 
+  Future<void> _powerAll(BuildContext context, {required bool shutdown}) async {
+    final peers = gFFI.abModel.currentAbPeers
+        .where((p) => p.tags.contains(name) && p.online == shutdown)
+        .toList();
+    if (peers.isEmpty) {
+      showToast(translate(shutdown
+          ? 'No online device with this tag'
+          : 'No offline device with this tag'));
+      return;
+    }
+    if (shutdown) {
+      final names = peers
+          .map((p) => p.alias.isNotEmpty ? p.alias : p.id)
+          .join(', ');
+      final ok = await gFFI.dialogManager.show<bool>(
+          (setState, close, context) => CustomAlertDialog(
+                title: Text(translate('Shut down all devices with this tag')),
+                content: Text(
+                    '${translate('Are you sure you want to shut down')} $names ?'),
+                actions: [
+                  dialogButton('Cancel', onPressed: close, isOutline: true),
+                  dialogButton('OK', onPressed: () => close(true)),
+                ],
+                onCancel: close,
+                onSubmit: () => close(true),
+              ));
+      if (ok != true) return;
+    }
+    showToast(translate(shutdown
+        ? 'Sending shutdown command...'
+        : 'Sending wake-up command...'));
+    final results = await Future.wait(peers.map((p) => shutdown
+        ? bind.mainShutdownPeer(id: p.id)
+        : bind.mainWakePeer(id: p.id)));
+    final failed = results.where((e) => e.isNotEmpty).length;
+    showToast('${translate('Done')}: ${peers.length - failed}'
+        '${failed > 0 ? ', ${translate('Failed')}: $failed' : ''}');
+  }
+
   void _showMenu(BuildContext context, RelativeRect pos) {
     final items = [
       getEntry(translate("Rename"), () {
@@ -868,6 +907,14 @@ class AddressBookTag extends StatelessWidget {
         gFFI.abModel.deleteTag(name);
         Future.delayed(Duration.zero, () => Get.back());
       }),
+      // Qianchen Desk: power actions for every device with this tag.
+      if (isDesktop) MenuEntryDivider<String>(),
+      if (isDesktop)
+        getEntry(translate('Shut down all devices with this tag'),
+            () => _powerAll(context, shutdown: true)),
+      if (isDesktop)
+        getEntry(translate('Wake up all devices with this tag'),
+            () => _powerAll(context, shutdown: false)),
     ];
 
     mod_menu.showMenu(
