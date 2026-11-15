@@ -302,6 +302,17 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
         dismissOnClicked: true,
         dismissCallback: cancelFunc,
       ));
+      menu.add(MenuEntryButton<String>(
+        childBuilder: (TextStyle? style) => Text(
+          translate('Shutdown remote device'),
+          style: style,
+        ),
+        proc: () => showShutdownRemoteDevice(
+            pi, peerId ?? '', sessionId, ffi.dialogManager),
+        padding: padding,
+        dismissOnClicked: true,
+        dismissCallback: cancelFunc,
+      ));
     }
 
     if (perms['keyboard'] != false && !ffi.ffiModel.viewOnly) {

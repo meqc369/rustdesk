@@ -664,6 +664,19 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
           actionId: kShortcutActionRestartRemote),
     );
   }
+  // shutdown, same permission as restart
+  if (isDefaultConn &&
+      perms['restart'] != false &&
+      (pi.platform == kPeerPlatformLinux ||
+          pi.platform == kPeerPlatformWindows ||
+          pi.platform == kPeerPlatformMacOS)) {
+    v.add(
+      TTextMenu(
+          child: Text(translate('Shutdown remote device')),
+          onPressed: () =>
+              showShutdownRemoteDevice(pi, id, sessionId, ffi.dialogManager)),
+    );
+  }
   // insertLock
   if (isDefaultConn && !ffiModel.viewOnly && ffi.ffiModel.keyboard) {
     v.add(

@@ -2096,6 +2096,12 @@ pub fn session_restart_remote_device(session_id: SessionID) {
     }
 }
 
+pub fn session_shutdown_remote_device(session_id: SessionID) {
+    if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+        session.shutdown_remote_device();
+    }
+}
+
 pub fn session_get_audit_server_sync(session_id: SessionID, typ: String) -> SyncReturn<String> {
     let res = if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         session.get_audit_server(typ)
@@ -2250,6 +2256,24 @@ pub fn main_wol(id: String) {
     // TODO: move send_wol outside.
     #[cfg(not(any(target_os = "ios")))]
     crate::lan::send_wol(id)
+}
+
+/// Qianchen Desk: shut down a peer from the device list. Returns "" on success.
+pub fn main_shutdown_peer(id: String) -> String {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return match hbb_common::tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt.block_on(crate::qianchen_power::shutdown_peer(id)),
+        Err(e) => e.to_string(),
+    };
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = id;
+        "Not supported".to_owned()
+    }
 }
 
 pub fn main_create_shortcut(_id: String) {

@@ -1443,6 +1443,43 @@ void showRestartRemoteDevice(PeerInfo pi, String id, SessionID sessionId,
   if (res == true) bind.sessionRestartRemoteDevice(sessionId: sessionId);
 }
 
+void showShutdownRemoteDevice(PeerInfo pi, String id, SessionID sessionId,
+    OverlayDialogManager dialogManager) async {
+  final res = await dialogManager
+      .show<bool>((setState, close, context) => CustomAlertDialog(
+            title: Row(children: [
+              Icon(Icons.power_settings_new_rounded,
+                  color: Colors.redAccent, size: 28),
+              Flexible(
+                  child: Text(translate("Shutdown remote device"))
+                      .paddingOnly(left: 10)),
+            ]),
+            content: Text(
+                "${translate('Are you sure you want to shut down')} \n${pi.username}@${pi.hostname}($id) ?"),
+            actions: [
+              dialogButton(
+                "Cancel",
+                icon: Icon(Icons.close_rounded),
+                onPressed: close,
+                isOutline: true,
+              ),
+              dialogButton(
+                "OK",
+                icon: Icon(Icons.done_rounded),
+                onPressed: () => close(true),
+              ),
+            ],
+            onCancel: close,
+            onSubmit: () => close(true),
+          ));
+  if (res == true) {
+    await bind.sessionShutdownRemoteDevice(sessionId: sessionId);
+    showToast(translate('Shutdown command sent'));
+    // The peer goes away; close the session instead of trying to reconnect.
+    Future.delayed(const Duration(seconds: 1), () => closeConnection(id: id));
+  }
+}
+
 showSetOSPassword(
   SessionID sessionId,
   bool login,

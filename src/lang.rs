@@ -266,6 +266,14 @@ pub fn translate_locale(name: String, locale: &str) -> String {
         if let Some(value) = placeholder_value.as_ref() {
             s = s.replace("{}", &value);
         }
+        // Qianchen Desk: show the product name in the UI; internal names stay "RustDesk".
+        if crate::is_rustdesk()
+            && s.contains("RustDesk")
+            && !name.starts_with("upgrade_rustdesk_server_pro")
+            && name != "powered_by_me"
+        {
+            s = s.replace("RustDesk", "千尘desk");
+        }
         if !crate::is_rustdesk() {
             if s.contains("RustDesk")
                 && !name.starts_with("upgrade_rustdesk_server_pro")

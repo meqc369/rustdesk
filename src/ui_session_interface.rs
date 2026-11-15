@@ -578,6 +578,11 @@ impl<T: InvokeUiSession> Session<T> {
         self.send(Data::Message(msg));
     }
 
+    pub fn shutdown_remote_device(&self) {
+        let msg = self.lc.read().unwrap().shutdown_remote_device();
+        self.send(Data::Message(msg));
+    }
+
     pub fn get_audit_server(&self, typ: String) -> String {
         if LocalConfig::get_option("access_token").is_empty() {
             return "".to_owned();

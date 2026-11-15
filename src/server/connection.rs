@@ -3968,6 +3968,20 @@ impl Connection {
                             }
                         }
                     }
+                    Some(misc::Union::ShutdownRemoteDevice(_)) => {
+                        // Uses the same permission as remote restart.
+                        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                        if self.restart {
+                            #[cfg(any(target_os = "linux", target_os = "windows"))]
+                            let res = system_shutdown::force_shutdown();
+                            #[cfg(target_os = "macos")]
+                            let res = system_shutdown::shutdown();
+                            match res {
+                                Ok(_) => log::info!("Shutdown by the peer"),
+                                Err(e) => log::error!("Failed to shutdown: {}", e),
+                            }
+                        }
+                    }
                     #[cfg(windows)]
                     Some(misc::Union::ElevationRequest(r)) => match r.union {
                         Some(elevation_request::Union::Direct(_)) => {

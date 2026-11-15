@@ -3061,18 +3061,19 @@ int versionCmp(String v1, String v2) {
 }
 
 String getWindowName({WindowType? overrideType}) {
-  final name = bind.mainGetAppNameSync();
+  final appName = bind.mainGetAppNameSync();
+  final name = appName == 'RustDesk' ? '千尘desk' : appName;
   switch (overrideType ?? kWindowType) {
     case WindowType.Main:
       return name;
     case WindowType.FileTransfer:
-      return "File Transfer - $name";
+      return "${translate('File Transfer')} - $name";
     case WindowType.ViewCamera:
-      return "View Camera - $name";
+      return "${translate('View Camera')} - $name";
     case WindowType.PortForward:
-      return "Port Forward - $name";
+      return "${translate('Port Forward')} - $name";
     case WindowType.RemoteDesktop:
-      return "Remote Desktop - $name";
+      return "${translate('Remote Desktop')} - $name";
     default:
       break;
   }

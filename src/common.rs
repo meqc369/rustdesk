@@ -2506,7 +2506,30 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
     ThrottledInterval::new(i)
 }
 
+/// Qianchen Desk: built-in server settings and unattended-access defaults.
+/// These are defaults, so a value saved in the settings page still wins.
+fn apply_qianchen_defaults() {
+    let mut defaults = config::DEFAULT_SETTINGS.write().unwrap();
+    for (k, v) in [
+        (keys::OPTION_CUSTOM_RENDEZVOUS_SERVER, "www.pienv.com"),
+        (keys::OPTION_RELAY_SERVER, "www.pienv.com"),
+        (keys::OPTION_API_SERVER, "https://www.pienv.com:21114"),
+        (keys::OPTION_KEY, "D8u9KJCnAkBwRG6je72oPTVxnHk6oIYXimXfCQJ1jEU="),
+        (keys::OPTION_VERIFICATION_METHOD, "use-permanent-password"),
+        (keys::OPTION_APPROVE_MODE, "password"),
+    ] {
+        defaults.entry(k.to_owned()).or_insert_with(|| v.to_owned());
+    }
+    drop(defaults);
+    // The API is served on https://...:21114; without this the port is stripped.
+    config::BUILTIN_SETTINGS
+        .write()
+        .unwrap()
+        .insert(keys::OPTION_ALLOW_HTTPS_21114.to_owned(), "Y".to_owned());
+}
+
 pub fn load_custom_client() {
+    apply_qianchen_defaults();
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());

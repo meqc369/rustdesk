@@ -592,6 +592,12 @@ abstract class BasePeerCard extends StatelessWidget {
     if (isWindows && peer.platform == kPeerPlatformWindows) {
       menuItems.add(_rdpAction(context, peer.id));
     }
+    if (isDesktop &&
+        (peer.platform == kPeerPlatformWindows ||
+            peer.platform == kPeerPlatformMacOS ||
+            peer.platform == kPeerPlatformLinux)) {
+      menuItems.add(_shutdownAction(peer));
+    }
     menuItems.add(MenuEntryDivider<String>());
     menuItems.add(_requestApprovalAction(context));
     // menuItems.add(await _openNewConnInOptAction(peer.id));
@@ -768,6 +774,44 @@ abstract class BasePeerCard extends StatelessWidget {
           )),
       proc: () {
         connectInPeerTab(context, peer, tab, isRDP: true);
+      },
+      padding: menuPadding,
+      dismissOnClicked: true,
+    );
+  }
+
+  /// Qianchen Desk: shut the peer down without opening a session.
+  @protected
+  MenuEntryBase<String> _shutdownAction(Peer peer) {
+    return MenuEntryButton<String>(
+      childBuilder: (TextStyle? style) => Text(
+        translate('Shutdown remote device'),
+        style: style,
+      ),
+      proc: () async {
+        final name = peer.alias.isNotEmpty ? peer.alias : peer.hostname;
+        final ok = await gFFI.dialogManager.show<bool>(
+            (setState, close, context) => CustomAlertDialog(
+                  title: Text(translate('Shutdown remote device')),
+                  content: Text(
+                      "${translate('Are you sure you want to shut down')} $name (${peer.id}) ?"),
+                  actions: [
+                    dialogButton("Cancel", onPressed: close, isOutline: true),
+                    dialogButton("OK", onPressed: () => close(true)),
+                  ],
+                  onCancel: close,
+                  onSubmit: () => close(true),
+                ));
+        if (ok != true) return;
+        showToast(translate('Sending shutdown command...'));
+        final err = await bind.mainShutdownPeer(id: peer.id);
+        if (err.isEmpty) {
+          showToast(translate('Shutdown command sent'));
+        } else if (err == 'Password Required') {
+          showToast(translate('shutdown-password-required-tip'));
+        } else {
+          showToast('${translate('Shutdown failed')}: ${translate(err)}');
+        }
       },
       padding: menuPadding,
       dismissOnClicked: true,
