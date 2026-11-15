@@ -1,6 +1,6 @@
-//! Qianchen Desk: shut down a peer from the device list without opening a session.
-//! It logs in with the password saved for that peer (or the address book one),
-//! sends the shutdown request and disconnects.
+//! Qianchen Desk: power actions from the device list without opening a session.
+//! They log in with the password saved for the peer (or the address book one),
+//! send one request and disconnect.
 
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -102,13 +102,51 @@ impl Interface for Headless {
 
 /// Returns "" on success, otherwise an untranslated error message.
 pub async fn shutdown_peer(id: String) -> String {
-    match shutdown_peer_(id).await {
+    let mut misc = Misc::new();
+    misc.set_shutdown_remote_device(true);
+    result(send_misc(id, misc).await)
+}
+
+/// Wake `id` up through another device on the same LAN that is still online.
+/// Candidates are devices that reported MACs, i.e. run Qianchen Desk; most recent first.
+/// Returns "" on success, otherwise an untranslated error message.
+pub async fn wake_peer(id: String) -> String {
+    let peers = hbb_common::config::PeerConfig::peers(None);
+    let macs = peers
+        .iter()
+        .find(|(x, _, _)| *x == id)
+        .and_then(|(_, _, c)| c.options.get("qc-macs").cloned())
+        .unwrap_or_default();
+    if macs.is_empty() {
+        return "wake-no-mac-tip".to_owned();
+    }
+    for (relay, _, _) in peers
+        .iter()
+        .filter(|(x, _, c)| *x != id && c.options.contains_key("qc-macs"))
+        .take(5)
+    {
+        let mut misc = Misc::new();
+        misc.set_qc_wake_on_lan(macs.clone());
+        match send_misc(relay.clone(), misc).await {
+            Ok(()) => {
+                log::info!("Wake-on-LAN for {} sent through {}", id, relay);
+                return "".to_owned();
+            }
+            Err(e) => log::info!("Relay {} for wake-on-LAN failed: {}", relay, e),
+        }
+    }
+    "wake-no-relay-tip".to_owned()
+}
+
+fn result(r: Result<(), String>) -> String {
+    match r {
         Ok(()) => "".to_owned(),
         Err(e) => e,
     }
 }
 
-async fn shutdown_peer_(id: String) -> Result<(), String> {
+/// Log in to `id` in the background, send one `Misc` message and disconnect.
+async fn send_misc(id: String, misc: Misc) -> Result<(), String> {
     let conn_type = ConnType::DEFAULT_CONN;
     let mut lc = LoginConfigHandler::default();
     lc.initialize(id.clone(), conn_type, None, false, None, None, None, "");
@@ -159,9 +197,11 @@ async fn shutdown_peer_(id: String) -> Result<(), String> {
         }
     }
 
-    let msg = trust.outgoing(ui.lc.read().unwrap().shutdown_remote_device());
-    stream.send(&msg).await.map_err(|e| e.to_string())?;
-    log::info!("Shutdown request sent to {}", id);
+    let mut msg_out = Message::new();
+    msg_out.set_misc(misc);
+    let msg_out = trust.outgoing(msg_out);
+    stream.send(&msg_out).await.map_err(|e| e.to_string())?;
+    log::info!("Request sent to {}", id);
     // Give the peer a moment to read the request before the connection closes.
     tokio::time::sleep(std::time::Duration::from_millis(800)).await;
     Ok(())

@@ -3707,6 +3707,14 @@ impl LoginConfigHandler {
                     .insert("other-server-key".to_owned(), c.clone());
             }
         }
+        // Qianchen Desk: remember the peer's MACs for remote wake-up.
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&pi.platform_additions) {
+            if let Some(macs) = v.get("qc_macs").and_then(|x| x.as_str()) {
+                if !macs.is_empty() {
+                    config.options.insert("qc-macs".to_owned(), macs.to_owned());
+                }
+            }
+        }
         // peer_relay only — see `initialize`: neither the proxy nor the WebSocket transport is a
         // fact about this peer, and writing one here makes it permanent.
         if self.peer_relay {

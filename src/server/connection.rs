@@ -2024,6 +2024,10 @@ impl Connection {
             platform_additions.insert("support_view_camera".into(), json!(true));
         }
 
+        // Qianchen Desk: the controller keeps these for remote wake-up.
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        platform_additions.insert("qc_macs".into(), json!(crate::lan::local_macs().join(",")));
+
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
         if !platform_additions.is_empty() {
             pi.platform_additions = serde_json::to_string(&platform_additions).unwrap_or("".into());
@@ -3966,6 +3970,14 @@ impl Connection {
                                 Ok(_) => log::info!("Restart by the peer"),
                                 Err(e) => log::error!("Failed to restart: {}", e),
                             }
+                        }
+                    }
+                    Some(misc::Union::QcWakeOnLan(_macs)) => {
+                        // Relay a wake-up for another device on this LAN. Same permission as restart.
+                        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                        if self.restart {
+                            log::info!("Wake-on-LAN requested by the peer: {}", _macs);
+                            crate::lan::send_wol_macs(&_macs);
                         }
                     }
                     Some(misc::Union::ShutdownRemoteDevice(_)) => {

@@ -1380,6 +1380,10 @@ class RustdeskImpl {
     return Future(() => js.context.callMethod('setByName', ['restart']));
   }
 
+  Future<String> mainWakePeer({required String id, dynamic hint}) {
+    throw UnimplementedError("mainWakePeer");
+  }
+
   Future<String> mainShutdownPeer({required String id, dynamic hint}) {
     throw UnimplementedError("mainShutdownPeer");
   }

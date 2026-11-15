@@ -596,7 +596,7 @@ abstract class BasePeerCard extends StatelessWidget {
         (peer.platform == kPeerPlatformWindows ||
             peer.platform == kPeerPlatformMacOS ||
             peer.platform == kPeerPlatformLinux)) {
-      menuItems.add(_shutdownAction(peer));
+      menuItems.add(peer.online ? _shutdownAction(peer) : _wakeAction(peer));
     }
     menuItems.add(MenuEntryDivider<String>());
     menuItems.add(_requestApprovalAction(context));
@@ -812,6 +812,26 @@ abstract class BasePeerCard extends StatelessWidget {
         } else {
           showToast('${translate('Shutdown failed')}: ${translate(err)}');
         }
+      },
+      padding: menuPadding,
+      dismissOnClicked: true,
+    );
+  }
+
+  /// Qianchen Desk: wake the peer up through another online device on its LAN.
+  @protected
+  MenuEntryBase<String> _wakeAction(Peer peer) {
+    return MenuEntryButton<String>(
+      childBuilder: (TextStyle? style) => Text(
+        translate('Wake up remote device'),
+        style: style,
+      ),
+      proc: () async {
+        showToast(translate('Sending wake-up command...'));
+        final err = await bind.mainWakePeer(id: peer.id);
+        showToast(err.isEmpty
+            ? translate('wake-sent-tip')
+            : translate(err));
       },
       padding: menuPadding,
       dismissOnClicked: true,

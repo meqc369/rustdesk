@@ -2276,6 +2276,24 @@ pub fn main_shutdown_peer(id: String) -> String {
     }
 }
 
+/// Qianchen Desk: wake a peer up through another online device on its LAN. Returns "" on success.
+pub fn main_wake_peer(id: String) -> String {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return match hbb_common::tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt.block_on(crate::qianchen_power::wake_peer(id)),
+        Err(e) => e.to_string(),
+    };
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = id;
+        "Not supported".to_owned()
+    }
+}
+
 pub fn main_create_shortcut(_id: String) {
     #[cfg(windows)]
     create_shortcut(_id);

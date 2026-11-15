@@ -874,6 +874,8 @@ message Misc {
     uint64 request_cursor_data = 39;
     // Qianchen Desk: power off the controlled device. A high number keeps clear of upstream fields.
     bool shutdown_remote_device = 1001;
+    // Qianchen Desk: ask this device to send Wake-on-LAN packets to these MACs (comma separated).
+    string qc_wake_on_lan = 1002;
   }
 }
 

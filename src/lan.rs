@@ -104,6 +104,45 @@ pub fn send_wol(id: String) {
     }
 }
 
+/// Qianchen Desk: MAC addresses of the interfaces that have a usable IPv4 address.
+pub fn local_macs() -> Vec<String> {
+    let mut res = Vec::new();
+    for interface in default_net::get_interfaces() {
+        if !interface
+            .ipv4
+            .iter()
+            .any(|x| !x.addr.is_loopback() && !x.addr.is_link_local())
+        {
+            continue;
+        }
+        if let Some(mac) = interface.mac_addr {
+            let mac = mac.address();
+            if mac != "00:00:00:00:00:00" && !res.contains(&mac) {
+                res.push(mac);
+            }
+        }
+    }
+    res
+}
+
+/// Qianchen Desk: send Wake-on-LAN packets for comma separated MACs on every local network.
+pub fn send_wol_macs(macs: &str) {
+    let interfaces = default_net::get_interfaces();
+    for mac in macs.split(',') {
+        if let Ok(mac_addr) = mac.trim().parse() {
+            for interface in &interfaces {
+                for ipv4 in &interface.ipv4 {
+                    if ipv4.addr.is_loopback() {
+                        continue;
+                    }
+                    log::info!("Send wol to {mac_addr} of {}", ipv4.addr);
+                    allow_err!(wol::send_wol(mac_addr, None, Some(IpAddr::V4(ipv4.addr))));
+                }
+            }
+        }
+    }
+}
+
 #[inline]
 fn get_broadcast_port() -> u16 {
     (RENDEZVOUS_PORT + 3) as _
