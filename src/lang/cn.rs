@@ -321,6 +321,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Shutdown failed", "关机失败"),
         ("End call", "结束通话"),
         ("Done", "完成"),
+        ("Permanent Password", "固定密码"),
+        ("permanent-password-only-tip", "只能用固定密码连接，点右侧铅笔修改"),
         ("Shut down all devices with this tag", "关闭这个标签下的所有电脑"),
         ("Wake up all devices with this tag", "远程开启这个标签下的所有电脑"),
         ("No online device with this tag", "这个标签下没有在线的电脑"),

@@ -312,7 +312,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   AutoSizeText(
-                    translate("One-time Password"),
+                    translate(showOneTime
+                        ? "One-time Password"
+                        : "Permanent Password"),
                     style: TextStyle(
                         fontSize: 14, color: textColor?.withOpacity(0.5)),
                     maxLines: 1,
@@ -328,16 +330,22 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                               showToast(translate("Copied"));
                             }
                           },
-                          child: TextFormField(
-                            controller: model.serverPasswd,
-                            readOnly: true,
-                            decoration: InputDecoration(
-                              border: InputBorder.none,
-                              contentPadding:
-                                  EdgeInsets.only(top: 14, bottom: 10),
-                            ),
-                            style: TextStyle(fontSize: 15),
-                          ).workaroundFreezeLinuxMint(),
+                          child: showOneTime
+                              ? TextFormField(
+                                  controller: model.serverPasswd,
+                                  readOnly: true,
+                                  decoration: InputDecoration(
+                                    border: InputBorder.none,
+                                    contentPadding:
+                                        EdgeInsets.only(top: 14, bottom: 10),
+                                  ),
+                                  style: TextStyle(fontSize: 15),
+                                ).workaroundFreezeLinuxMint()
+                              : Text(translate('permanent-password-only-tip'),
+                                      style: TextStyle(
+                                          fontSize: 14,
+                                          color: textColor?.withOpacity(0.7)))
+                                  .paddingOnly(top: 14, bottom: 10),
                         ),
                       ),
                       if (showOneTime)
@@ -612,8 +620,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
                 colors: [
-                  Color.fromARGB(255, 226, 66, 188),
-                  Color.fromARGB(255, 244, 114, 124),
+                  Color(0xFF12806F),
+                  Color(0xFF2BA58C),
                 ],
               )),
               padding: EdgeInsets.all(20),
