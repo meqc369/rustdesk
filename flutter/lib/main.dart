@@ -155,6 +155,15 @@ void runMainApp(bool startService) async {
   windowManager.waitUntilReadyToShow(windowOptions, () async {
     // Restore the location of the main window before window hide or show.
     await restoreWindowPosition(WindowType.Main);
+    // Qianchen Desk: the device panel needs some room.
+    const minSize = Size(960, 640);
+    await windowManager.setMinimumSize(minSize);
+    final size = await windowManager.getSize();
+    if (size.width < minSize.width || size.height < minSize.height) {
+      await windowManager.setSize(Size(
+          size.width < minSize.width ? minSize.width : size.width,
+          size.height < minSize.height ? minSize.height : size.height));
+    }
     // Check the startup argument, if we successfully handle the argument, we keep the main window hidden.
     final handledByUniLinks = await initUniLinks();
     debugPrint("handled by uni links: $handledByUniLinks");

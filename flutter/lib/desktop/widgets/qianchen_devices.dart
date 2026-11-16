@@ -31,6 +31,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
   final Map<String, bool> _online = {};
   String _selectedId = '';
   bool? _recentExpanded;
+  String _tag = '';
   Timer? _timer;
   Worker? _loginWorker;
   final Set<String> _busy = {};
@@ -119,7 +120,10 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         final loggedIn = gFFI.userModel.userName.value.isNotEmpty;
         final abPeers = loggedIn ? gFFI.abModel.currentAbPeers.toList() : <Peer>[];
         final abIds = abPeers.map((e) => e.id).toSet();
-        final mine = _filterSort(abPeers);
+        final tags = loggedIn ? gFFI.abModel.currentAbTags.toList() : <String>[];
+        if (_tag.isNotEmpty && !tags.contains(_tag)) _tag = '';
+        final mine = _filterSort(abPeers
+            .where((p) => _tag.isEmpty || p.tags.contains(_tag)));
         final recent = _filterSort(
             gFFI.recentPeersModel.peers.where((p) => !abIds.contains(p.id)));
         final all = [...mine, ...recent];
@@ -131,7 +135,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
             SizedBox(
               width: 300,
               child: _buildList(context, loggedIn, mine, recent, abPeers,
-                  selected?.id ?? ''),
+                  selected?.id ?? '', tags),
             ),
             VerticalDivider(width: 1, color: Theme.of(context).dividerColor),
             Expanded(
@@ -145,7 +149,8 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
   }
 
   Widget _buildList(BuildContext context, bool loggedIn, List<Peer> mine,
-      List<Peer> recent, List<Peer> abPeers, String selectedId) {
+      List<Peer> recent, List<Peer> abPeers, String selectedId,
+      List<String> tags) {
     final onlineCount = abPeers.where(_isOnline).length;
     // Collapsed by default only when there are devices of our own to show.
     final recentExpanded = _recentExpanded ?? mine.isEmpty;
@@ -182,6 +187,19 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
               _queryOnlines();
             },
           ),
+          PopupMenuButton<String>(
+            tooltip: translate('qc-batch'),
+            icon: const Icon(Icons.checklist_rounded, size: 20),
+            enabled: mine.isNotEmpty,
+            onSelected: (v) => _batch(mine, shutdown: v == 'shutdown'),
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                  value: 'shutdown',
+                  child: Text(translate('qc-batch-shutdown'))),
+              PopupMenuItem(
+                  value: 'wake', child: Text(translate('qc-batch-wake'))),
+            ],
+          ),
           IconButton(
             tooltip: translate('Classic view'),
             icon: const Icon(Icons.view_list_rounded, size: 20),
@@ -197,6 +215,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
                       ? '${translate('My devices')} ($onlineCount/${abPeers.length})'
                       : translate('My devices'),
                   expanded: true),
+              if (loggedIn && tags.isNotEmpty) _buildTags(context, tags),
               if (!loggedIn) _buildLoginHint(context),
               if (loggedIn && abPeers.isEmpty)
                 _hint(context, translate('qc-no-devices-tip')),
@@ -214,6 +233,154 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         ),
       ],
     );
+  }
+
+  Widget _buildTags(BuildContext context, List<String> tags) {
+    Widget chip(String label, String value, Color? color) {
+      final selected = _tag == value;
+      return ChoiceChip(
+        label: Text(label, style: const TextStyle(fontSize: 12)),
+        selected: selected,
+        visualDensity: VisualDensity.compact,
+        avatar: color == null
+            ? null
+            : CircleAvatar(backgroundColor: color, radius: 5),
+        selectedColor: MyTheme.accent.withOpacity(0.18),
+        onSelected: (_) => setState(() => _tag = value),
+      );
+    }
+
+    return Wrap(spacing: 6, runSpacing: 6, children: [
+      chip(translate('All'), '', null),
+      ...tags.map((t) => chip(t, t, gFFI.abModel.getCurrentAbTagColor(t))),
+    ]).paddingSymmetric(horizontal: 12, vertical: 4);
+  }
+
+  Future<void> _batch(List<Peer> peers, {required bool shutdown}) async {
+    final targets = peers.where((p) => _isOnline(p) == shutdown).toList();
+    if (targets.isEmpty) {
+      showToast(translate(shutdown
+          ? 'qc-batch-none-online'
+          : 'qc-batch-none-offline'));
+      return;
+    }
+    final names = targets.map(_name).join('、');
+    final ok = await gFFI.dialogManager.show<bool>(
+        (setState, close, context) => CustomAlertDialog(
+              title: Text(translate(
+                  shutdown ? 'qc-batch-shutdown' : 'qc-batch-wake')),
+              content: Text('$names (${targets.length})'),
+              actions: [
+                dialogButton('Cancel', onPressed: close, isOutline: true),
+                dialogButton('OK', onPressed: () => close(true)),
+              ],
+              onCancel: close,
+              onSubmit: () => close(true),
+            ));
+    if (ok != true) return;
+    showToast(translate(shutdown
+        ? 'Sending shutdown command...'
+        : 'Sending wake-up command...'));
+    final results = await Future.wait(targets.map((p) => shutdown
+        ? bind.mainShutdownPeer(id: p.id)
+        : bind.mainWakePeer(id: p.id)));
+    final failed = results.where((e) => e.isNotEmpty).length;
+    showToast('${translate('Done')}: ${targets.length - failed}'
+        '${failed > 0 ? ', ${translate('Failed')}: $failed' : ''}');
+    Future.delayed(const Duration(seconds: 10), _queryOnlines);
+  }
+
+  Future<void> _addToMine(Peer p) async {
+    final err = await gFFI.abModel
+        .addIdToCurrent(p.id, p.alias, '', _tag.isEmpty ? [] : [_tag], '');
+    showToast(err == null || err.isEmpty
+        ? translate('qc-added-to-my-devices')
+        : '${translate('Failed')}: $err');
+  }
+
+  Future<void> _removeFromMine(Peer p) async {
+    final ok = await gFFI.dialogManager.show<bool>(
+        (setState, close, context) => CustomAlertDialog(
+              title: Text(translate('qc-remove-from-my-devices')),
+              content: Text('${_name(p)} (${formatID(p.id)})'),
+              actions: [
+                dialogButton('Cancel', onPressed: close, isOutline: true),
+                dialogButton('OK', onPressed: () => close(true)),
+              ],
+              onCancel: close,
+              onSubmit: () => close(true),
+            ));
+    if (ok == true) await gFFI.abModel.deletePeers([p.id]);
+  }
+
+  Future<void> _showItemMenu(BuildContext context, Peer p, Offset pos) async {
+    final online = _isOnline(p);
+    final inAb = gFFI.userModel.isLogin &&
+        gFFI.abModel.currentAbPeers.any((e) => e.id == p.id);
+    final canEdit = inAb && gFFI.abModel.current.canWrite();
+    final desktopPeer = p.platform != kPeerPlatformAndroid;
+    PopupMenuItem<String> item(String value, IconData icon, String label) =>
+        PopupMenuItem(
+            value: value,
+            height: 36,
+            child: Row(children: [
+              Icon(icon, size: 18),
+              const SizedBox(width: 10),
+              Text(translate(label)),
+            ]));
+    final v = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(pos.dx, pos.dy, pos.dx, pos.dy),
+      items: [
+        item('connect', Icons.desktop_windows_rounded, 'Remote control'),
+        item('file', Icons.drive_file_move_rounded, 'File transfer'),
+        if (desktopPeer && online) ...[
+          const PopupMenuDivider(),
+          item('lock', Icons.lock_rounded, 'Lock screen'),
+          item('restart', Icons.restart_alt_rounded, 'Restart'),
+          item('shutdown', Icons.power_settings_new_rounded, 'Shut down'),
+        ],
+        if (desktopPeer && !online)
+          item('wake', Icons.power_rounded, 'Wake up remote device'),
+        const PopupMenuDivider(),
+        if (canEdit) item('rename', Icons.edit_rounded, 'Rename'),
+        if (!inAb && gFFI.userModel.isLogin)
+          item('add', Icons.add_rounded, 'qc-add-to-my-devices'),
+        if (canEdit)
+          item('remove', Icons.delete_outline_rounded,
+              'qc-remove-from-my-devices'),
+      ],
+    );
+    if (!mounted || v == null) return;
+    switch (v) {
+      case 'connect':
+        connect(context, p.id);
+        break;
+      case 'file':
+        connect(context, p.id, isFileTransfer: true);
+        break;
+      case 'lock':
+        _power(p, 'lock', 'Lock screen');
+        break;
+      case 'restart':
+        _power(p, 'restart', 'Restart');
+        break;
+      case 'shutdown':
+        _power(p, 'shutdown', 'Shut down');
+        break;
+      case 'wake':
+        _power(p, 'wake', 'Wake up remote device');
+        break;
+      case 'rename':
+        _rename(p);
+        break;
+      case 'add':
+        _addToMine(p);
+        break;
+      case 'remove':
+        _removeFromMine(p);
+        break;
+    }
   }
 
   Widget _sectionHeader(BuildContext context, String text,
@@ -257,6 +424,10 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
       child: InkWell(
         onTap: () => setState(() => _selectedId = p.id),
         onDoubleTap: () => connect(context, p.id),
+        onSecondaryTapDown: (d) {
+          setState(() => _selectedId = p.id);
+          _showItemMenu(context, p, d.globalPosition);
+        },
         child: Row(children: [
           _statusDot(online),
           const SizedBox(width: 10),
@@ -359,6 +530,15 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
           _chip(online ? translate('Online') : translate('Offline'),
               online ? const Color(0xFF22B573) : Colors.grey),
         ]),
+        if (!inAb && gFFI.userModel.isLogin)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: Text(translate('qc-add-to-my-devices')),
+              onPressed: () => _addToMine(p),
+            ),
+          ).paddingOnly(top: 6),
         const SizedBox(height: 14),
         _infoRow(context, translate('qc-device-id'), formatID(p.id), copy: p.id),
         if (system.isNotEmpty) _infoRow(context, translate('System'), system),
