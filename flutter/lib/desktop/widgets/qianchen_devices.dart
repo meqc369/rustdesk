@@ -30,7 +30,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
   final _search = TextEditingController();
   final Map<String, bool> _online = {};
   String _selectedId = '';
-  bool _recentExpanded = false;
+  bool? _recentExpanded;
   Timer? _timer;
   Worker? _loginWorker;
   final Set<String> _busy = {};
@@ -124,7 +124,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
             gFFI.recentPeersModel.peers.where((p) => !abIds.contains(p.id)));
         final all = [...mine, ...recent];
         Peer? selected = all.firstWhereOrNull((p) => p.id == _selectedId);
-        selected ??= mine.isNotEmpty ? mine.first : null;
+        selected ??= all.isNotEmpty ? all.first : null;
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -147,6 +147,8 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
   Widget _buildList(BuildContext context, bool loggedIn, List<Peer> mine,
       List<Peer> recent, List<Peer> abPeers, String selectedId) {
     final onlineCount = abPeers.where(_isOnline).length;
+    // Collapsed by default only when there are devices of our own to show.
+    final recentExpanded = _recentExpanded ?? mine.isEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -202,10 +204,10 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
               if (recent.isNotEmpty)
                 _sectionHeader(
                     context, '${translate('Recent sessions')} (${recent.length})',
-                    expanded: _recentExpanded,
+                    expanded: recentExpanded,
                     onTap: () =>
-                        setState(() => _recentExpanded = !_recentExpanded)),
-              if (_recentExpanded)
+                        setState(() => _recentExpanded = !recentExpanded)),
+              if (recentExpanded)
                 ...recent.map((p) => _buildItem(context, p, p.id == selectedId)),
             ],
           ),
@@ -258,9 +260,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         child: Row(children: [
           _statusDot(online),
           const SizedBox(width: 10),
-          Opacity(
-              opacity: online ? 1 : 0.5,
-              child: getPlatformImage(p.platform, size: 20)),
+          _platformIcon(p.platform, 20, online),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -284,6 +284,24 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         ]).paddingSymmetric(horizontal: 14, vertical: 8),
       ),
     );
+  }
+
+  Widget _platformIcon(String platform, double size, bool online) {
+    final IconData icon;
+    if (platform == kPeerPlatformMacOS) {
+      icon = Icons.apple;
+    } else if (platform == kPeerPlatformLinux) {
+      icon = Icons.terminal_rounded;
+    } else if (platform == kPeerPlatformAndroid) {
+      icon = Icons.android_rounded;
+    } else if (platform.isEmpty) {
+      icon = Icons.devices_rounded;
+    } else {
+      icon = Icons.window_rounded;
+    }
+    return Icon(icon,
+        size: size,
+        color: online ? MyTheme.accent : Colors.grey.withOpacity(0.6));
   }
 
   Widget _statusDot(bool online) => Container(
@@ -322,7 +340,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
       padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
       children: [
         Row(children: [
-          getPlatformImage(p.platform, size: 30),
+          _platformIcon(p.platform, 28, online),
           const SizedBox(width: 12),
           Flexible(
             child: Text(_name(p),
