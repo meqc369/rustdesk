@@ -23,6 +23,8 @@ const TIME_CONN: Duration = Duration::from_secs(3);
 lazy_static::lazy_static! {
     static ref SENDER : Mutex<broadcast::Sender<Vec<i32>>> = Mutex::new(start_hbbs_sync());
     static ref PRO: Arc<Mutex<bool>> = Default::default();
+    // Qianchen Desk: result of the last console command, sent with the next heartbeat.
+    static ref QC_ACK: Mutex<Option<Value>> = Default::default();
 }
 
 #[cfg(not(any(target_os = "ios")))]
@@ -229,7 +231,7 @@ async fn start_hbbs_sync_async() {
                         }
                     }
                 }
-                if conns.is_empty() && last_sent.map(|x| x.elapsed() < TIME_HEARTBEAT).unwrap_or(false) {
+                if conns.is_empty() && QC_ACK.lock().unwrap().is_none() && last_sent.map(|x| x.elapsed() < TIME_HEARTBEAT).unwrap_or(false) {
                     continue;
                 }
                 last_sent = Some(Instant::now());
@@ -242,6 +244,9 @@ async fn start_hbbs_sync_async() {
                 }
                 let modified_at = LocalConfig::get_option("strategy_timestamp").parse::<i64>().unwrap_or(0);
                 v["modified_at"] = json!(modified_at);
+                if let Some(ack) = QC_ACK.lock().unwrap().take() {
+                    v["qc_ack"] = ack;
+                }
                 let response = crate::post_request(url.clone(), v.to_string(), "").await;
                 if let Err(err) = &response {
                     hbb_common::throttled_log!(API_LOG_INTERVAL, warn, "Heartbeat failed: {err:?}");
@@ -252,6 +257,11 @@ async fn start_hbbs_sync_async() {
                             info_uploaded.uploaded = false;
                             config::Status::set("sysinfo_hash", "".to_owned());
                             log::info!("sysinfo required to forcely update");
+                        }
+                        if let Some(cmd) = rsp.remove("qc_cmd") {
+                            if let Some(cmd) = cmd.as_str() {
+                                handle_qc_cmd(&id, cmd).await;
+                            }
                         }
                         if let Some(conns)  = rsp.remove("disconnect") {
                                 if let Ok(conns) = serde_json::from_value::<Vec<i32>>(conns) {
@@ -279,6 +289,72 @@ async fn start_hbbs_sync_async() {
             }
         }
     }
+}
+
+/// Qianchen Desk: run a command from the web console. The server signs it with the
+/// rendezvous key the client already trusts; replays and stale commands are refused.
+#[cfg(not(any(target_os = "ios")))]
+async fn handle_qc_cmd(id: &str, signed: &str) {
+    let key = crate::get_key(true).await;
+    let Some(pk) = crate::common::get_rs_pk(&key) else { return };
+    let Ok(raw) = crate::decode64(signed) else { return };
+    let Ok(payload) = hbb_common::sodiumoxide::crypto::sign::verify(&raw, &pk) else {
+        log::warn!("Rejected unsigned console command");
+        return;
+    };
+    let Ok(cmd) = serde_json::from_slice::<Value>(&payload) else { return };
+    let cid = cmd["cid"].as_i64().unwrap_or(0);
+    let ts = cmd["ts"].as_i64().unwrap_or(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let last = LocalConfig::get_option("qc-last-cmd").parse::<i64>().unwrap_or(0);
+    if cmd["id"].as_str() != Some(id) || cid <= last || (now - ts).abs() > 600 {
+        log::warn!("Rejected console command {cid}");
+        return;
+    }
+    LocalConfig::set_option("qc-last-cmd".to_owned(), cid.to_string());
+    let action = cmd["action"].as_str().unwrap_or_default().to_owned();
+    log::info!("Console command {cid}: {action}");
+    let (ok, msg) = match action.as_str() {
+        "password" => {
+            let pw = cmd["pw"].as_str().unwrap_or_default();
+            if pw.len() < 6 {
+                (false, "password too short".to_owned())
+            } else if Config::set_permanent_password(pw) {
+                (true, String::new())
+            } else {
+                (false, "password change is disabled on this device".to_owned())
+            }
+        }
+        "restart" | "shutdown" => {
+            let shutdown = action == "shutdown";
+            // Leave time for the acknowledgement heartbeat.
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                let res = if shutdown {
+                    #[cfg(any(target_os = "linux", target_os = "windows"))]
+                    let r = system_shutdown::force_shutdown();
+                    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+                    let r = system_shutdown::shutdown();
+                    r
+                } else {
+                    #[cfg(any(target_os = "linux", target_os = "windows"))]
+                    let r = system_shutdown::force_reboot();
+                    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+                    let r = system_shutdown::reboot();
+                    r
+                };
+                if let Err(e) = res {
+                    log::error!("Console {}: {}", if shutdown { "shutdown" } else { "restart" }, e);
+                }
+            });
+            (true, String::new())
+        }
+        _ => (false, format!("unknown action {action}")),
+    };
+    *QC_ACK.lock().unwrap() = Some(json!({ "cid": cid, "ok": ok, "msg": msg }));
 }
 
 fn heartbeat_url() -> String {
