@@ -478,7 +478,7 @@ class MyTheme {
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFFFFFFFF),
         foregroundColor: Colors.black87,
         side: BorderSide(color: Color(0xFFDDE3E0)),
         shape: RoundedRectangleBorder(
