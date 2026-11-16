@@ -613,9 +613,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       children: [
         Container(
           margin: EdgeInsets.fromLTRB(
-              0, marginTop, 0, bind.isIncomingOnly() ? marginTop : 0),
+              14, marginTop, 14, bind.isIncomingOnly() ? marginTop : 0),
           child: Container(
               decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
                   gradient: LinearGradient(
                 begin: Alignment.centerLeft,
                 end: Alignment.centerRight,
@@ -624,7 +625,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                   Color(0xFF2BA58C),
                 ],
               )),
-              padding: EdgeInsets.all(20),
+              padding: EdgeInsets.all(16),
               child: Column(
                   mainAxisAlignment: MainAxisAlignment.start,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -658,13 +659,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                                   children: [
                                     FixedWidthButton(
                                       width: 150,
-                                      padding: 8,
+                                      padding: 6,
                                       isOutline: true,
                                       text: translate(btnText),
                                       textColor: Colors.white,
                                       borderColor: Colors.white,
-                                      textSize: 20,
-                                      radius: 10,
+                                      textSize: 15,
+                                      radius: 8,
                                       onTap: onPressed,
                                     )
                                   ])

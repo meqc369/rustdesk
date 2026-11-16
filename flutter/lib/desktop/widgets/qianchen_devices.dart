@@ -29,7 +29,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
   static const _handlerName = 'qianchen_devices';
   final _search = TextEditingController();
   final Map<String, bool> _online = {};
-  String _selectedId = '';
+  String _selectedId = bind.getLocalFlutterOption(k: 'qc-last-device');
   bool? _recentExpanded;
   String _tag = '';
   Timer? _timer;
@@ -67,6 +67,12 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     _loginWorker?.dispose();
     _search.dispose();
     super.dispose();
+  }
+
+  void _select(String id) {
+    if (id == _selectedId) return;
+    setState(() => _selectedId = id);
+    bind.setLocalFlutterOption(k: 'qc-last-device', v: id);
   }
 
   void _pullAb() {
@@ -343,7 +349,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         if (desktopPeer && !online)
           item('wake', Icons.power_rounded, 'Wake up remote device'),
         const PopupMenuDivider(),
-        if (canEdit) item('rename', Icons.edit_rounded, 'Rename'),
+        item('rename', Icons.edit_rounded, 'qc-edit-remark'),
         if (!inAb && gFFI.userModel.isLogin)
           item('add', Icons.add_rounded, 'qc-add-to-my-devices'),
         if (canEdit)
@@ -372,7 +378,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         _power(p, 'wake', 'Wake up remote device');
         break;
       case 'rename':
-        _rename(p);
+        _editRemark(p, canEdit);
         break;
       case 'add':
         _addToMine(p);
@@ -416,16 +422,21 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
   Widget _buildItem(BuildContext context, Peer p, bool selected) {
     final online = _isOnline(p);
     final name = _name(p);
-    final sub = p.alias.isNotEmpty && p.hostname.isNotEmpty
-        ? '${formatID(p.id)} · ${p.hostname}'
-        : formatID(p.id);
+    final extra = p.note.isNotEmpty
+        ? p.note
+        : (p.alias.isNotEmpty ? p.hostname : '');
+    final sub =
+        extra.isNotEmpty ? '${formatID(p.id)} · $extra' : formatID(p.id);
     return Material(
       color: selected ? MyTheme.accent.withOpacity(0.12) : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
       child: InkWell(
-        onTap: () => setState(() => _selectedId = p.id),
+        borderRadius: BorderRadius.circular(10),
+        hoverColor: MyTheme.accent.withOpacity(0.06),
+        onTap: () => _select(p.id),
         onDoubleTap: () => connect(context, p.id),
         onSecondaryTapDown: (d) {
-          setState(() => _selectedId = p.id);
+          _select(p.id);
           _showItemMenu(context, p, d.globalPosition);
         },
         child: Row(children: [
@@ -452,9 +463,9 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
               ],
             ),
           ),
-        ]).paddingSymmetric(horizontal: 14, vertical: 8),
+        ]).paddingSymmetric(horizontal: 12, vertical: 8),
       ),
-    );
+    ).paddingSymmetric(horizontal: 6, vertical: 1);
   }
 
   Widget _platformIcon(String platform, double size, bool online) {
@@ -511,24 +522,46 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
       padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
       children: [
         Row(children: [
-          _platformIcon(p.platform, 28, online),
-          const SizedBox(width: 12),
-          Flexible(
-            child: Text(_name(p),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style:
-                    const TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
-          ),
-          if (canEdit)
-            IconButton(
-              tooltip: translate('Rename'),
-              icon: const Icon(Icons.edit_rounded, size: 18),
-              onPressed: () => _rename(p),
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              color: (online ? MyTheme.accent : Colors.grey).withOpacity(0.10),
+              borderRadius: BorderRadius.circular(14),
             ),
-          const SizedBox(width: 6),
-          _chip(online ? translate('Online') : translate('Offline'),
-              online ? const Color(0xFF22B573) : Colors.grey),
+            child: Center(child: _platformIcon(p.platform, 28, online)),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Flexible(
+                    child: Text(_name(p),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.w600)),
+                  ),
+                  IconButton(
+                    tooltip: translate('qc-edit-remark'),
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(Icons.edit_rounded, size: 16, color: muted),
+                    onPressed: () => _editRemark(p, canEdit),
+                  ),
+                ]),
+                Row(children: [
+                  _chip(online ? translate('Online') : translate('Offline'),
+                      online ? const Color(0xFF22B573) : Colors.grey),
+                  if (inAb) ...[
+                    const SizedBox(width: 6),
+                    _chip(translate('My devices'), MyTheme.accent),
+                  ],
+                ]),
+              ],
+            ),
+          ),
         ]),
         if (!inAb && gFFI.userModel.isLogin)
           Align(
@@ -539,12 +572,24 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
               onPressed: () => _addToMine(p),
             ),
           ).paddingOnly(top: 6),
-        const SizedBox(height: 14),
-        _infoRow(context, translate('qc-device-id'), formatID(p.id), copy: p.id),
-        if (system.isNotEmpty) _infoRow(context, translate('System'), system),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+          decoration: BoxDecoration(
+            color: Theme.of(context).hoverColor.withOpacity(0.5),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(children: [
+            _infoRow(context, translate('qc-device-id'), formatID(p.id),
+                copy: p.id),
+            if (system.isNotEmpty)
+              _infoRow(context, translate('System'), system),
+            if (p.note.isNotEmpty)
+              _infoRow(context, translate('qc-note'), p.note),
+          ]),
+        ),
         const SizedBox(height: 18),
-        Text(translate('Connect'),
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+        _sectionTitle(context, translate('Connect')),
         const SizedBox(height: 10),
         Wrap(spacing: 10, runSpacing: 10, children: [
           _tile(Icons.desktop_windows_rounded, 'Remote control',
@@ -563,15 +608,15 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
             p.platform == kPeerPlatformMacOS ||
             p.platform == kPeerPlatformLinux ||
             p.platform.isEmpty) ...[
-          Text(translate('Power'),
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+          _sectionTitle(context, translate('Power')),
           const SizedBox(height: 10),
           if (online)
             Wrap(spacing: 10, runSpacing: 10, children: [
               _powerButton(p, Icons.lock_rounded, 'Lock screen', 'lock'),
               _powerButton(p, Icons.restart_alt_rounded, 'Restart', 'restart'),
               _powerButton(
-                  p, Icons.power_settings_new_rounded, 'Shut down', 'shutdown'),
+                  p, Icons.power_settings_new_rounded, 'Shut down', 'shutdown',
+                  danger: true),
             ])
           else ...[
             _powerButton(p, Icons.power_rounded, 'Wake up remote device', 'wake',
@@ -622,10 +667,13 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
       width: 92,
       height: 84,
       child: Material(
-        color: MyTheme.accent.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(12),
+        color: MyTheme.accent.withOpacity(0.07),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: MyTheme.accent.withOpacity(0.15))),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
+          hoverColor: MyTheme.accent.withOpacity(0.10),
           onTap: onTap,
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(icon, size: 28, color: MyTheme.accent),
@@ -640,7 +688,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
   }
 
   Widget _powerButton(Peer p, IconData icon, String label, String action,
-      {bool primary = false}) {
+      {bool primary = false, bool danger = false}) {
     final busy = _busy.contains('${p.id}/$action');
     final child = busy
         ? const SizedBox(
@@ -651,8 +699,23 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         ? ElevatedButton.icon(
             onPressed: onPressed, icon: child, label: Text(translate(label)))
         : OutlinedButton.icon(
-            onPressed: onPressed, icon: child, label: Text(translate(label)));
+            style: danger
+                ? OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFD9534F),
+                    side: BorderSide(
+                        color: const Color(0xFFD9534F).withOpacity(0.4)))
+                : null,
+            onPressed: onPressed,
+            icon: child,
+            label: Text(translate(label)));
   }
+
+  Widget _sectionTitle(BuildContext context, String text) => Text(text,
+      style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.5,
+          color: Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.7)));
 
   Future<void> _power(Peer p, String action, String label) async {
     if (action == 'restart' || action == 'shutdown') {
@@ -702,20 +765,57 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     }
   }
 
-  void _rename(Peer p) {
-    final controller = TextEditingController(text: _name(p));
+  /// Remark name (alias) for any device; the note is kept in the address book.
+  void _editRemark(Peer p, bool canEditAb) {
+    final alias = TextEditingController(text: p.alias);
+    final note = TextEditingController(text: p.note);
     gFFI.dialogManager.show((setState, close, context) {
       submit() async {
-        final alias = controller.text.trim();
+        final newAlias = alias.text.trim();
+        final newNote = note.text.trim();
         close();
-        if (alias != p.alias) {
-          await gFFI.abModel.changeAlias(id: p.id, alias: alias);
+        if (newAlias != p.alias) {
+          if (canEditAb) {
+            await gFFI.abModel.changeAlias(id: p.id, alias: newAlias);
+          }
+          await bind.mainSetPeerAlias(id: p.id, alias: newAlias);
+          bind.mainLoadRecentPeers();
         }
+        if (canEditAb && newNote != p.note) {
+          await gFFI.abModel.changeNote(id: p.id, note: newNote);
+        }
+        showToast(translate('Successful'));
       }
 
       return CustomAlertDialog(
-        title: Text(translate('Rename')),
-        content: TextField(controller: controller, autofocus: true),
+        title: Text(translate('qc-edit-remark')),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(translate('qc-remark-name'),
+                style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 6),
+            TextField(
+              controller: alias,
+              autofocus: true,
+              decoration: InputDecoration(
+                  hintText: p.hostname.isNotEmpty ? p.hostname : formatID(p.id)),
+            ),
+            if (canEditAb) ...[
+              const SizedBox(height: 14),
+              Text(translate('qc-note'), style: const TextStyle(fontSize: 13)),
+              const SizedBox(height: 6),
+              TextField(
+                controller: note,
+                minLines: 2,
+                maxLines: 4,
+                decoration:
+                    InputDecoration(hintText: translate('qc-note-hint')),
+              ),
+            ],
+          ],
+        ).paddingOnly(top: 4),
         actions: [
           dialogButton('Cancel', onPressed: close, isOutline: true),
           dialogButton('OK', onPressed: submit),
@@ -724,5 +824,6 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         onSubmit: submit,
       );
     });
+
   }
 }

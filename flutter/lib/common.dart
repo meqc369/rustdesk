@@ -370,34 +370,71 @@ class MyTheme {
     }),
   );
 
+  // Qianchen Desk: rounded, roomier menus (remote toolbar submenus, menu bars).
+  static MenuThemeData qcMenuTheme(Color background, Color border) =>
+      MenuThemeData(
+        style: MenuStyle(
+          backgroundColor: MaterialStatePropertyAll(background),
+          surfaceTintColor: const MaterialStatePropertyAll(Colors.transparent),
+          elevation: const MaterialStatePropertyAll(8),
+          shadowColor: const MaterialStatePropertyAll(Colors.black26),
+          side: MaterialStatePropertyAll(BorderSide(color: border)),
+          padding: const MaterialStatePropertyAll(
+              EdgeInsets.symmetric(vertical: 6, horizontal: 4)),
+          shape: MaterialStatePropertyAll(
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+        ),
+      );
+
+  static MenuButtonThemeData qcMenuButtonTheme() => MenuButtonThemeData(
+        style: ButtonStyle(
+          minimumSize: const MaterialStatePropertyAll(Size(0, 36)),
+          padding: const MaterialStatePropertyAll(
+              EdgeInsets.symmetric(horizontal: 12)),
+          shape: MaterialStatePropertyAll(
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(6))),
+          overlayColor: MaterialStateProperty.resolveWith((states) =>
+              states.contains(MaterialState.hovered) ||
+                      states.contains(MaterialState.focused)
+                  ? accent.withOpacity(0.10)
+                  : null),
+          textStyle:
+              const MaterialStatePropertyAll(TextStyle(fontSize: 14)),
+        ),
+      );
+
   static ThemeData lightTheme = ThemeData(
     // https://stackoverflow.com/questions/77537315/after-upgrading-to-flutter-3-16-the-app-bar-background-color-button-size-and
     useMaterial3: false,
     brightness: Brightness.light,
-    hoverColor: Color.fromARGB(255, 224, 224, 224),
+    hoverColor: Color(0xFFE9EFED),
     scaffoldBackgroundColor: Colors.white,
     dialogBackgroundColor: Colors.white,
     appBarTheme: AppBarTheme(
       shadowColor: Colors.transparent,
     ),
     dialogTheme: DialogTheme(
-      elevation: 15,
+      elevation: 10,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18.0),
-        side: BorderSide(
-          width: 1,
-          color: grayBg,
-        ),
+        borderRadius: BorderRadius.circular(14.0),
       ),
     ),
     scrollbarTheme: scrollbarTheme,
     inputDecorationTheme: isDesktop
         ? InputDecorationTheme(
-            fillColor: grayBg,
+            fillColor: Color(0xFFF5F7F6),
             filled: true,
             isDense: true,
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: Color(0xFFDDE3E0)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: accent, width: 1.5),
             ),
           )
         : null,
@@ -422,8 +459,9 @@ class MyTheme {
         ? TextButtonThemeData(
             style: TextButton.styleFrom(
               splashFactory: NoSplash.splashFactory,
+              foregroundColor: accent,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18.0),
+                borderRadius: BorderRadius.circular(8.0),
               ),
             ),
           )
@@ -431,6 +469,8 @@ class MyTheme {
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: MyTheme.accent,
+        foregroundColor: Colors.white,
+        elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8.0),
         ),
@@ -438,13 +478,16 @@ class MyTheme {
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        backgroundColor: grayBg,
+        backgroundColor: Colors.white,
         foregroundColor: Colors.black87,
+        side: BorderSide(color: Color(0xFFDDE3E0)),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8.0),
         ),
       ),
     ),
+    menuTheme: qcMenuTheme(Colors.white, Color(0xFFE3E8E6)),
+    menuButtonTheme: qcMenuButtonTheme(),
     switchTheme: switchTheme(),
     radioTheme: radioTheme(),
     checkboxTheme: checkboxTheme,
@@ -456,12 +499,13 @@ class MyTheme {
         primary: accent, secondary: accent, background: grayBg),
     popupMenuTheme: PopupMenuThemeData(
         color: Colors.white,
+        elevation: 8,
         shape: RoundedRectangleBorder(
           side: BorderSide(
               color: (isDesktop || isWebDesktop)
-                  ? Color(0xFFECECEC)
+                  ? Color(0xFFE3E8E6)
                   : Colors.transparent),
-          borderRadius: BorderRadius.all(Radius.circular(8.0)),
+          borderRadius: BorderRadius.all(Radius.circular(10.0)),
         )),
   ).copyWith(
     extensions: <ThemeExtension<dynamic>>[
@@ -479,12 +523,12 @@ class MyTheme {
       shadowColor: Colors.transparent,
     ),
     dialogTheme: DialogTheme(
-      elevation: 15,
+      elevation: 10,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18.0),
+        borderRadius: BorderRadius.circular(14.0),
         side: BorderSide(
           width: 1,
-          color: Color(0xFF24252B),
+          color: Color(0xFF2C2E35),
         ),
       ),
     ),
@@ -495,7 +539,11 @@ class MyTheme {
             filled: true,
             isDense: true,
             border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: idColor, width: 1.5),
             ),
           )
         : null,
@@ -526,7 +574,7 @@ class MyTheme {
               disabledForegroundColor: Colors.white70,
               foregroundColor: Colors.white70,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(18.0),
+                borderRadius: BorderRadius.circular(8.0),
               ),
             ),
           )
@@ -537,6 +585,7 @@ class MyTheme {
         foregroundColor: Colors.white,
         disabledForegroundColor: Colors.white70,
         disabledBackgroundColor: Colors.white10,
+        elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8.0),
         ),
@@ -553,6 +602,8 @@ class MyTheme {
         ),
       ),
     ),
+    menuTheme: qcMenuTheme(Color(0xFF24252B), Color(0xFF34363E)),
+    menuButtonTheme: qcMenuButtonTheme(),
     switchTheme: switchTheme(),
     radioTheme: radioTheme(),
     checkboxTheme: checkboxTheme,

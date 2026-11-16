@@ -344,11 +344,9 @@ class _ToolbarTheme {
 
   static double dividerSpaceToAction = isWindows ? 8 : 14;
 
-  static double menuBorderRadius = isWindows ? 5.0 : 7.0;
-  static EdgeInsets menuPadding = isWindows
-      ? EdgeInsets.fromLTRB(4, 12, 4, 12)
-      : EdgeInsets.fromLTRB(6, 14, 6, 14);
-  static const double menuButtonBorderRadius = 3.0;
+  static double menuBorderRadius = 10.0;
+  static EdgeInsets menuPadding = EdgeInsets.fromLTRB(4, 6, 4, 6);
+  static const double menuButtonBorderRadius = 6.0;
 
   static Color borderColor(BuildContext context) =>
       MyTheme.color(context).border3 ?? MyTheme.border;
@@ -365,6 +363,8 @@ class _ToolbarTheme {
             borderRadius:
                 BorderRadius.circular(_ToolbarTheme.menuBorderRadius))),
         padding: MaterialStateProperty.all(_ToolbarTheme.menuPadding),
+        elevation: const MaterialStatePropertyAll(8),
+        shadowColor: const MaterialStatePropertyAll(Colors.black26),
       );
   static final defaultMenuButtonStyle = ButtonStyle(
     backgroundColor: MaterialStatePropertyAll(Colors.transparent),
