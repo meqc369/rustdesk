@@ -2517,6 +2517,8 @@ fn apply_qianchen_defaults() {
         (keys::OPTION_KEY, "D8u9KJCnAkBwRG6je72oPTVxnHk6oIYXimXfCQJ1jEU="),
         (keys::OPTION_VERIFICATION_METHOD, "use-permanent-password"),
         (keys::OPTION_APPROVE_MODE, "password"),
+        // LAN-first connections reach the peer on its direct port (21118).
+        (keys::OPTION_DIRECT_SERVER, "Y"),
     ] {
         defaults.entry(k.to_owned()).or_insert_with(|| v.to_owned());
     }

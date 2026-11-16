@@ -125,6 +125,29 @@ pub fn local_macs() -> Vec<String> {
     res
 }
 
+/// Qianchen Desk: IPv4 addresses a controller on the same network can reach us at.
+/// Skips loopback, link-local and 198.18.0.0/15 (the fake-IP range of VPN TUN adapters).
+pub fn local_lan_ipv4s() -> Vec<String> {
+    let mut res = Vec::new();
+    for interface in default_net::get_interfaces() {
+        for v4 in &interface.ipv4 {
+            let ip = v4.addr;
+            let o = ip.octets();
+            if ip.is_loopback() || ip.is_link_local() || ip.is_unspecified() {
+                continue;
+            }
+            if o[0] == 198 && (o[1] == 18 || o[1] == 19) {
+                continue;
+            }
+            let s = ip.to_string();
+            if !res.contains(&s) {
+                res.push(s);
+            }
+        }
+    }
+    res
+}
+
 /// Qianchen Desk: send Wake-on-LAN packets for comma separated MACs on every local network.
 pub fn send_wol_macs(macs: &str) {
     let interfaces = default_net::get_interfaces();

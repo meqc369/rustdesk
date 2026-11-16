@@ -1453,7 +1453,9 @@ async fn direct_server(server: ServerPtr) {
                             server,
                             hbb_common::Stream::from(stream, local_addr),
                             addr,
-                            false,
+                            // Qianchen Desk: offer the identity handshake. Our controllers answer it
+                            // (LAN-first) or send an empty message to skip it (plain IP access).
+                            true,
                             ConnectionMeta::default(), // Direct connections don't have server-side user context.
                         )
                         .await

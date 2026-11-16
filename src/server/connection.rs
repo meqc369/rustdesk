@@ -2027,6 +2027,8 @@ impl Connection {
         // Qianchen Desk: the controller keeps these for remote wake-up.
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
         platform_additions.insert("qc_macs".into(), json!(crate::lan::local_macs().join(",")));
+        #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+        platform_additions.insert("qc_ips".into(), json!(crate::lan::local_lan_ipv4s().join(",")));
 
         #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
         if !platform_additions.is_empty() {

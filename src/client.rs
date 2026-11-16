@@ -438,10 +438,14 @@ impl Client {
         }
         // to-do: remember the port for each peer, so that we can retry easier
         if hbb_common::is_ip_str(peer) {
+            let mut conn =
+                connect_tcp_local(check_port(peer, RELAY_PORT + 1), None, CONNECT_TIMEOUT).await?;
+            // Qianchen Desk: the direct listener offers an identity handshake; an empty message
+            // declines it, the same way secure_connection does without a known peer key.
+            conn.send(&Message::new()).await?;
             return Ok((
                 (
-                    connect_tcp_local(check_port(peer, RELAY_PORT + 1), None, CONNECT_TIMEOUT)
-                        .await?,
+                    conn,
                     true,
                     None,
                     None,
@@ -453,9 +457,11 @@ impl Client {
         }
         // Allow connect to {domain}:{port}
         if hbb_common::is_domain_port_str(peer) {
+            let mut conn = connect_tcp_local(peer, None, CONNECT_TIMEOUT).await?;
+            conn.send(&Message::new()).await?;
             return Ok((
                 (
-                    connect_tcp_local(peer, None, CONNECT_TIMEOUT).await?,
+                    conn,
                     true,
                     None,
                     None,
@@ -467,6 +473,12 @@ impl Client {
         }
 
         let other_server = interface.get_lch().read().unwrap().other_server.clone();
+        if other_server.is_none() && !interface.is_force_relay() {
+            if let Some((conn, pk)) = Self::qc_try_lan(peer, key).await {
+                log::info!("Qianchen Desk: connected to {} over LAN", peer);
+                return Ok(((conn, true, pk, None, "TCP"), (0, "".to_owned()), false));
+            }
+        }
         let (peer, other_server, key, token) = if let Some((a, b, c)) = other_server.as_ref() {
             (a.as_ref(), b.as_ref(), c.as_ref(), "")
         } else {
@@ -1651,6 +1663,43 @@ impl Client {
         Ok((conn, direct, pk, kcp, typ))
     }
 
+    /// Qianchen Desk: connect straight to the peer's LAN address when we know one, so two
+    /// machines at home stay on the LAN even when VPNs make them look far apart.
+    /// The peer must prove the identity seen on an earlier rendezvous connection.
+    async fn qc_try_lan(peer: &str, key: &str) -> Option<(Stream, Option<Vec<u8>>)> {
+        let cfg = PeerConfig::load(peer);
+        let signed_id_pk = crate::decode64(cfg.options.get("qc-signed-pk")?).ok()?;
+        let tries: Vec<_> = cfg
+            .options
+            .get("qc-lan-ips")?
+            .split(',')
+            .filter(|x| !x.is_empty())
+            .map(|ip| {
+                let addr = format!("{}:{}", ip, RELAY_PORT + 1);
+                async move { connect_tcp_local(addr, None, 800).await }.boxed()
+            })
+            .collect();
+        if tries.is_empty() {
+            return None;
+        }
+        let mut conn = match timeout(1000, select_ok(tries)).await {
+            Ok(Ok((conn, _))) => conn,
+            _ => return None,
+        };
+        match timeout(
+            3000,
+            Self::secure_connection(peer, signed_id_pk, key, &mut conn),
+        )
+        .await
+        {
+            Ok(Ok(pk)) if conn.is_secured() => Some((conn, pk)),
+            _ => {
+                log::info!("Qianchen Desk: LAN address of {} did not verify", peer);
+                None
+            }
+        }
+    }
+
     /// Establish secure connection with the server.
     async fn secure_connection(
         peer_id: &str,
@@ -1747,6 +1796,13 @@ impl Client {
                                         picked,
                                     },
                                 )?;
+                                // Qianchen Desk: kept for LAN-first connections.
+                                let encoded = crate::encode64(&signed_id_pk);
+                                let mut pc = PeerConfig::load(peer_id);
+                                if pc.options.get("qc-signed-pk") != Some(&encoded) {
+                                    pc.options.insert("qc-signed-pk".to_owned(), encoded);
+                                    pc.store(peer_id);
+                                }
                             } else {
                                 if is_webrtc {
                                     bail!("WebRTC handshake id mismatch (possible MITM)");
@@ -3713,6 +3769,9 @@ impl LoginConfigHandler {
                 if !macs.is_empty() {
                     config.options.insert("qc-macs".to_owned(), macs.to_owned());
                 }
+            }
+            if let Some(ips) = v.get("qc_ips").and_then(|x| x.as_str()) {
+                config.options.insert("qc-lan-ips".to_owned(), ips.to_owned());
             }
         }
         // peer_relay only — see `initialize`: neither the proxy nor the WebSocket transport is a
