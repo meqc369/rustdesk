@@ -317,12 +317,19 @@ async fn handle_qc_cmd(id: &str, signed: &str) {
     LocalConfig::set_option("qc-last-cmd".to_owned(), cid.to_string());
     let action = cmd["action"].as_str().unwrap_or_default().to_owned();
     log::info!("Console command {cid}: {action}");
+    let mut hash = String::new();
     let (ok, msg) = match action.as_str() {
         "password" => {
             let pw = cmd["pw"].as_str().unwrap_or_default();
             if pw.len() < 6 {
                 (false, "password too short".to_owned())
             } else if Config::set_permanent_password(pw) {
+                // Same digest the address book stores, so saved logins keep working.
+                use sha2::{Digest, Sha256};
+                let mut h = Sha256::new();
+                h.update(pw);
+                h.update(Config::get_salt());
+                hash = crate::encode64(h.finalize());
                 (true, String::new())
             } else {
                 (false, "password change is disabled on this device".to_owned())
@@ -354,7 +361,7 @@ async fn handle_qc_cmd(id: &str, signed: &str) {
         }
         _ => (false, format!("unknown action {action}")),
     };
-    *QC_ACK.lock().unwrap() = Some(json!({ "cid": cid, "ok": ok, "msg": msg }));
+    *QC_ACK.lock().unwrap() = Some(json!({ "cid": cid, "ok": ok, "msg": msg, "hash": hash }));
 }
 
 fn heartbeat_url() -> String {
