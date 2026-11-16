@@ -17,6 +17,7 @@ import 'package:flutter_hbb/models/peer_model.dart';
 import '../../common.dart';
 import '../../common/formatter/id_formatter.dart';
 import '../../common/widgets/peer_tab_page.dart';
+import '../widgets/qianchen_devices.dart';
 import '../../common/widgets/autocomplete.dart';
 import '../../models/platform_model.dart';
 import '../../desktop/widgets/material_mod_popup_menu.dart' as mod_menu;
@@ -301,6 +302,15 @@ class _ConnectionPageState extends State<ConnectionPage>
     }
   }
 
+  // Qianchen Desk: device panel by default, the original peer tabs on request.
+  bool _classicPeers =
+      bind.getLocalFlutterOption(k: 'qc-classic-peer-view') == 'Y';
+
+  void _setClassicPeers(bool v) {
+    bind.setLocalFlutterOption(k: 'qc-classic-peer-view', v: v ? 'Y' : '');
+    setState(() => _classicPeers = v);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isOutgoingOnly = bind.isOutgoingOnly();
@@ -316,7 +326,21 @@ class _ConnectionPageState extends State<ConnectionPage>
             ).marginOnly(top: 22),
             SizedBox(height: 12),
             Divider().paddingOnly(right: 12),
-            Expanded(child: PeerTabPage()),
+            Expanded(
+                child: _classicPeers
+                    ? Column(children: [
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            icon: const Icon(Icons.devices_rounded, size: 18),
+                            label: Text(translate('My devices')),
+                            onPressed: () => _setClassicPeers(false),
+                          ),
+                        ),
+                        Expanded(child: PeerTabPage()),
+                      ])
+                    : QianchenDevicesPanel(
+                        onShowClassic: () => _setClassicPeers(true))),
           ],
         ).paddingOnly(left: 12.0)),
         if (!isOutgoingOnly) const Divider(height: 1),

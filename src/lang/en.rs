@@ -2,6 +2,17 @@ lazy_static::lazy_static! {
 pub static ref T: std::collections::HashMap<&'static str, &'static str> =
     [
         ("desk_tip", "Your desktop can be accessed with this ID and password."),
+        ("shutdown-password-required-tip", "No saved password for this device. Connect once and tick \"Remember password\"."),
+        ("wake-sent-tip", "Wake-up signal sent. The device usually comes online within a minute."),
+        ("wake-no-mac-tip", "The network card address of this device is unknown. Connect to it once while it is on."),
+        ("wake-no-relay-tip", "No online device on the same LAN to relay the wake-up signal."),
+        ("permanent-password-only-tip", "Permanent password only. Click the pencil to change it."),
+        ("qc-no-devices-tip", "No devices in the address book yet."),
+        ("qc-login-tip", "Log in to see all your devices here."),
+        ("qc-select-device-tip", "Select a device on the left"),
+        ("qc-wake-tip", "Requires Wake-on-LAN in BIOS and another online device on the same LAN."),
+        ("qc-refresh", "Refresh"),
+        ("qc-device-id", "ID"),
         ("connecting_status", "Connecting to the RustDesk network..."),
         ("not_ready_status", "Not ready. Please check your connection"),
         ("ID/Relay Server", "ID/Relay server"),

@@ -107,6 +107,20 @@ pub async fn shutdown_peer(id: String) -> String {
     result(send_misc(id, misc).await)
 }
 
+/// Returns "" on success, otherwise an untranslated error message.
+pub async fn restart_peer(id: String) -> String {
+    let mut misc = Misc::new();
+    misc.set_restart_remote_device(true);
+    result(send_misc(id, misc).await)
+}
+
+/// Returns "" on success, otherwise an untranslated error message.
+pub async fn lock_peer(id: String) -> String {
+    let mut msg = Message::new();
+    msg.set_key_event(crate::keyboard::client::event_lock_screen());
+    result(send_message(id, msg).await)
+}
+
 /// Wake `id` up through another device on the same LAN that is still online.
 /// Candidates are devices that reported MACs, i.e. run Qianchen Desk; most recent first.
 /// Returns "" on success, otherwise an untranslated error message.
@@ -145,8 +159,14 @@ fn result(r: Result<(), String>) -> String {
     }
 }
 
-/// Log in to `id` in the background, send one `Misc` message and disconnect.
 async fn send_misc(id: String, misc: Misc) -> Result<(), String> {
+    let mut msg = Message::new();
+    msg.set_misc(misc);
+    send_message(id, msg).await
+}
+
+/// Log in to `id` in the background, send one message and disconnect.
+async fn send_message(id: String, msg_out: Message) -> Result<(), String> {
     let conn_type = ConnType::DEFAULT_CONN;
     let mut lc = LoginConfigHandler::default();
     lc.initialize(id.clone(), conn_type, None, false, None, None, None, "");
@@ -197,8 +217,6 @@ async fn send_misc(id: String, misc: Misc) -> Result<(), String> {
         }
     }
 
-    let mut msg_out = Message::new();
-    msg_out.set_misc(misc);
     let msg_out = trust.outgoing(msg_out);
     stream.send(&msg_out).await.map_err(|e| e.to_string())?;
     log::info!("Request sent to {}", id);

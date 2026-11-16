@@ -2258,6 +2258,40 @@ pub fn main_wol(id: String) {
     crate::lan::send_wol(id)
 }
 
+/// Qianchen Desk: restart a peer from the device list. Returns "" on success.
+pub fn main_restart_peer(id: String) -> String {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return qianchen_block_on(crate::qianchen_power::restart_peer(id));
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = id;
+        "Not supported".to_owned()
+    }
+}
+
+/// Qianchen Desk: lock a peer's screen from the device list. Returns "" on success.
+pub fn main_lock_peer(id: String) -> String {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    return qianchen_block_on(crate::qianchen_power::lock_peer(id));
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = id;
+        "Not supported".to_owned()
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn qianchen_block_on(f: impl std::future::Future<Output = String>) -> String {
+    match hbb_common::tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt.block_on(f),
+        Err(e) => e.to_string(),
+    }
+}
+
 /// Qianchen Desk: shut down a peer from the device list. Returns "" on success.
 pub fn main_shutdown_peer(id: String) -> String {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
