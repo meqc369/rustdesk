@@ -252,14 +252,20 @@ class UserModel {
     for (final item in jsonDecode(resp.body)) {
       ops.add(item as String);
     }
+    // Qianchen Desk: accounts log in with username and password only; the API server's
+    // "webauth" option (browser login) is hidden.
+    bool keep(dynamic e) =>
+        e is Map && e['name'].toString().toLowerCase() != 'webauth';
     for (final item in ops) {
       if (item.startsWith('common-oidc/')) {
-        return jsonDecode(item.substring('common-oidc/'.length));
+        final list = jsonDecode(item.substring('common-oidc/'.length));
+        return list is List ? list.where(keep).toList() : [];
       }
     }
     return ops
         .where((item) => item.startsWith('oidc/'))
         .map((item) => {'name': item.substring('oidc/'.length)})
+        .where(keep)
         .toList();
   }
 }
