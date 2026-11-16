@@ -139,7 +139,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             SizedBox(
-              width: 300,
+              width: 280,
               child: _buildList(context, loggedIn, mine, recent, abPeers,
                   selected?.id ?? '', tags),
             ),
@@ -591,7 +591,8 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         const SizedBox(height: 18),
         _sectionTitle(context, translate('Connect')),
         const SizedBox(height: 10),
-        Wrap(spacing: 10, runSpacing: 10, children: [
+        LayoutBuilder(builder: (context, c) {
+          final tiles = <Widget>[
           _tile(Icons.desktop_windows_rounded, 'Remote control',
               () => connect(context, p.id)),
           _tile(Icons.drive_file_move_rounded, 'File transfer',
@@ -602,7 +603,17 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
               p.platform == kPeerPlatformLinux)
             _tile(Icons.videocam_rounded, 'View camera',
                 () => connect(context, p.id, isViewCamera: true)),
-        ]),
+          ];
+          // One row of tiles that shrinks with the window.
+          final w = ((c.maxWidth - 10 * (tiles.length - 1)) / tiles.length)
+              .clamp(64.0, 110.0);
+          return Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: tiles
+                  .map((t) => SizedBox(width: w, height: 78, child: t))
+                  .toList());
+        }),
         const SizedBox(height: 22),
         if (p.platform == kPeerPlatformWindows ||
             p.platform == kPeerPlatformMacOS ||
@@ -664,8 +675,6 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
 
   Widget _tile(IconData icon, String label, VoidCallback onTap) {
     return SizedBox(
-      width: 92,
-      height: 84,
       child: Material(
         color: MyTheme.accent.withOpacity(0.07),
         shape: RoundedRectangleBorder(
@@ -676,9 +685,11 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
           hoverColor: MyTheme.accent.withOpacity(0.10),
           onTap: onTap,
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(icon, size: 28, color: MyTheme.accent),
-            const SizedBox(height: 8),
+            Icon(icon, size: 26, color: MyTheme.accent),
+            const SizedBox(height: 6),
             Text(translate(label),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 13),
                 textAlign: TextAlign.center),
           ]),
