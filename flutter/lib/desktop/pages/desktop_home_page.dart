@@ -6,6 +6,7 @@ import 'package:auto_size_text/auto_size_text.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common/widgets/login.dart';
 import 'package:flutter_hbb/common/widgets/animated_rotation_widget.dart';
 import 'package:flutter_hbb/common/widgets/custom_password.dart';
 import 'package:flutter_hbb/consts.dart';
@@ -90,8 +91,20 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         child: loadLogo(),
       ),
       buildTip(context),
-      if (!isOutgoingOnly) buildIDBoard(context),
-      if (!isOutgoingOnly) buildPasswordBoard(context),
+      if (!isOutgoingOnly)
+        Container(
+          margin: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+          padding: const EdgeInsets.only(top: 6, bottom: 2),
+          decoration: BoxDecoration(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: MyTheme.accent.withOpacity(0.12)),
+          ),
+          child: Column(children: [
+            buildIDBoard(context),
+            buildPasswordBoard(context),
+          ]),
+        ),
       FutureBuilder<Widget>(
         future: Future.value(
             Obx(() => buildHelpCards(stateGlobal.updateUrl.value))),
@@ -111,6 +124,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         },
       ),
     ];
+    // Room for the account strip pinned to the bottom.
+    if (!isIncomingOnly) children.add(const SizedBox(height: 72));
     if (isIncomingOnly) {
       children.addAll([
         Divider(),
@@ -129,7 +144,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     return ChangeNotifierProvider.value(
       value: gFFI.serverModel,
       child: Container(
-        width: isIncomingOnly ? 280.0 : 200.0,
+        width: isIncomingOnly ? 280.0 : 236.0,
         color: Theme.of(context).colorScheme.background,
         child: Stack(
           children: [
@@ -145,6 +160,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                 Expanded(child: Container())
               ],
             ),
+            if (!isIncomingOnly)
+              Positioned(
+                left: 12,
+                right: 12,
+                bottom: 10,
+                child: _buildAccountStrip(context),
+              ),
             if (isOutgoingOnly)
               Positioned(
                 bottom: 6,
@@ -178,6 +200,61 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     );
   }
 
+  // Qianchen Desk: signed-in account at the bottom of the left pane.
+  Widget _buildAccountStrip(BuildContext context) {
+    return Obx(() {
+      final name = gFFI.userModel.userName.value;
+      final loggedIn = name.isNotEmpty;
+      final muted = Theme.of(context).textTheme.bodySmall?.color;
+      return Container(
+        padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+        decoration: BoxDecoration(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: MyTheme.accent.withOpacity(0.12)),
+        ),
+        child: Row(children: [
+          CircleAvatar(
+            radius: 15,
+            backgroundColor: MyTheme.accent.withOpacity(loggedIn ? 0.9 : 0.15),
+            child: loggedIn
+                ? Text(name.characters.first.toUpperCase(),
+                    style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w600))
+                : Icon(Icons.person_rounded, size: 18, color: MyTheme.accent),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(loggedIn ? name : translate('qc-not-logged-in'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600)),
+                Text(
+                    translate(loggedIn ? 'qc-account-synced' : 'qc-login-hint'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: muted)),
+              ],
+            ),
+          ),
+          loggedIn
+              ? IconButton(
+                  tooltip: translate('Logout'),
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(Icons.logout_rounded, size: 18, color: muted),
+                  onPressed: logOutConfirmDialog,
+                )
+              : TextButton(
+                  onPressed: loginDialog, child: Text(translate('Login'))),
+        ]),
+      );
+    });
+  }
+
   buildRightPane(BuildContext context) {
     return Container(
       color: Theme.of(context).scaffoldBackgroundColor,
@@ -188,16 +265,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   buildIDBoard(BuildContext context) {
     final model = gFFI.serverModel;
     return Container(
-      margin: const EdgeInsets.only(left: 20, right: 11),
-      height: 57,
+      margin: const EdgeInsets.only(left: 9, right: 6),
+      height: 62,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.baseline,
         textBaseline: TextBaseline.alphabetic,
         children: [
-          Container(
-            width: 2,
-            decoration: const BoxDecoration(color: MyTheme.accent),
-          ).marginOnly(top: 5),
+          const SizedBox(width: 0),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(left: 7),
@@ -211,16 +285,36 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          translate("ID"),
+                          translate("qc-device-id"),
                           style: TextStyle(
-                              fontSize: 14,
+                              fontSize: 13,
                               color: Theme.of(context)
                                   .textTheme
                                   .titleLarge
                                   ?.color
                                   ?.withOpacity(0.5)),
                         ).marginOnly(top: 5),
-                        buildPopupMenu(context)
+                        Row(mainAxisSize: MainAxisSize.min, children: [
+                          InkWell(
+                            borderRadius: BorderRadius.circular(15),
+                            onTap: () {
+                              Clipboard.setData(
+                                  ClipboardData(text: model.serverId.text));
+                              showToast(translate("Copied"));
+                            },
+                            child: Tooltip(
+                              message: translate('Copy'),
+                              child: Icon(Icons.copy_rounded,
+                                  size: 16,
+                                  color: Theme.of(context)
+                                      .textTheme
+                                      .titleLarge
+                                      ?.color
+                                      ?.withOpacity(0.45)),
+                            ).paddingAll(6),
+                          ),
+                          buildPopupMenu(context),
+                        ]),
                       ],
                     ),
                   ),
@@ -238,8 +332,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                           border: InputBorder.none,
                           contentPadding: EdgeInsets.only(top: 10, bottom: 10),
                         ),
-                        style: TextStyle(
-                          fontSize: 22,
+                        style: const TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.5,
                         ),
                       ).workaroundFreezeLinuxMint(),
                     ),
@@ -295,16 +391,12 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     final showOneTime = model.approveMode != 'click' &&
         model.verificationMethod != kUsePermanentPassword;
     return Container(
-      margin: EdgeInsets.only(left: 20.0, right: 16, top: 13, bottom: 13),
+      margin: EdgeInsets.only(left: 9.0, right: 8, top: 2, bottom: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.baseline,
         textBaseline: TextBaseline.alphabetic,
         children: [
-          Container(
-            width: 2,
-            height: 52,
-            decoration: BoxDecoration(color: MyTheme.accent),
-          ),
+          const SizedBox(width: 0, height: 52),
           Expanded(
             child: Padding(
               padding: const EdgeInsets.only(left: 7),
@@ -396,40 +488,27 @@ class _DesktopHomePageState extends State<DesktopHomePage>
 
   buildTip(BuildContext context) {
     final isOutgoingOnly = bind.isOutgoingOnly();
+    final muted = Theme.of(context).textTheme.bodySmall?.color?.withOpacity(0.7);
     return Padding(
-      padding:
-          const EdgeInsets.only(left: 20.0, right: 16, top: 16.0, bottom: 5),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Column(
-            children: [
-              if (!isOutgoingOnly)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    translate("Your Desktop"),
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-            ],
+          // Qianchen Desk: product header
+          Row(children: [
+            ClipRRect(
+                borderRadius: BorderRadius.circular(8), child: loadIcon(32)),
+            const SizedBox(width: 10),
+            Text('千尘desk',
+                style: const TextStyle(
+                    fontSize: 18, fontWeight: FontWeight.w700, letterSpacing: 0.3)),
+          ]),
+          const SizedBox(height: 18),
+          Text(
+            translate(isOutgoingOnly ? 'outgoing_only_desk_tip' : 'qc-this-device'),
+            style: TextStyle(
+                fontSize: 13, fontWeight: FontWeight.w600, color: muted),
           ),
-          SizedBox(
-            height: 10.0,
-          ),
-          if (!isOutgoingOnly)
-            Text(
-              translate("desk_tip"),
-              overflow: TextOverflow.clip,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          if (isOutgoingOnly)
-            Text(
-              translate("outgoing_only_desk_tip"),
-              overflow: TextOverflow.clip,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
         ],
       ),
     );
