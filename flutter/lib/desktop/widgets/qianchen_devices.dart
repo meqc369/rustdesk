@@ -55,7 +55,17 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     }, replace: true);
     bind.mainLoadRecentPeers();
     _pullAb();
-    _loginWorker = ever(gFFI.userModel.userName, (_) => _pullAb());
+    // userName is set before the login dialog stores access_token; pulling
+    // right away gets a 401, which logs the user straight back out.
+    _loginWorker = ever(gFFI.userModel.userName, (String name) async {
+      if (name.isEmpty) return;
+      for (var i = 0;
+          i < 30 && bind.mainGetLocalOption(key: 'access_token').isEmpty;
+          i++) {
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+      if (mounted) _pullAb();
+    });
     _timer = Timer.periodic(const Duration(seconds: 6), (_) => _queryOnlines());
     Future.delayed(const Duration(milliseconds: 800), _queryOnlines);
   }
