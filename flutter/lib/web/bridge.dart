@@ -1380,6 +1380,14 @@ class RustdeskImpl {
     return Future(() => js.context.callMethod('setByName', ['restart']));
   }
 
+  Future<String> mainQcCheckUpdate({dynamic hint}) {
+    return Future.value('');
+  }
+
+  Future<String> mainQcApplyUpdate({dynamic hint}) {
+    throw UnimplementedError("mainQcApplyUpdate");
+  }
+
   Future<String> mainLockPeer({required String id, dynamic hint}) {
     throw UnimplementedError("mainLockPeer");
   }

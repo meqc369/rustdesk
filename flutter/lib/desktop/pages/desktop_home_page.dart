@@ -48,6 +48,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   var watchIsInputMonitoring = false;
   var watchIsCanRecordAudio = false;
   Timer? _updateTimer;
+  // Qianchen Desk: newer build waiting on our server (macOS installs it on demand).
+  final RxString _qcNewBuild = ''.obs;
+  final RxBool _qcUpdating = false.obs;
+  Timer? _qcUpdateTimer;
   bool isCardClosed = false;
 
   final RxBool _editHover = false.obs;
@@ -104,6 +108,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
             buildPasswordBoard(context),
           ]),
         ),
+      Obx(() => _qcNewBuild.value.isEmpty
+          ? const SizedBox.shrink()
+          : _buildQcUpdateCard(context)),
       FutureBuilder<Widget>(
         future: Future.value(
             Obx(() => buildHelpCards(stateGlobal.updateUrl.value))),
@@ -196,6 +203,61 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           ],
         ),
       ),
+    );
+  }
+
+  Future<void> _qcCheckUpdate() async {
+    final b = await bind.mainQcCheckUpdate();
+    if (mounted) _qcNewBuild.value = b;
+  }
+
+  Future<void> _qcApplyUpdate() async {
+    _qcUpdating.value = true;
+    final err = await bind.mainQcApplyUpdate();
+    if (err.isNotEmpty) {
+      _qcUpdating.value = false;
+      showToast('${translate('qc-update-failed')}: $err');
+      launchUrl(Uri.parse('${await bind.mainGetApiServer()}/download/'));
+    }
+  }
+
+  Widget _buildQcUpdateCard(BuildContext context) {
+    final ink = Theme.of(context).textTheme.titleLarge?.color;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+      decoration: BoxDecoration(
+        color: MyTheme.accent.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: MyTheme.accent.withOpacity(0.25)),
+      ),
+      child: Row(children: [
+        const Icon(Icons.system_update_alt_rounded,
+            size: 20, color: MyTheme.accent),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(translate('qc-update-ready'),
+              style: TextStyle(
+                  fontSize: 13, fontWeight: FontWeight.w600, color: ink)),
+        ),
+        Obx(() => _qcUpdating.value
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2))
+            : ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  elevation: 0,
+                  visualDensity: VisualDensity.compact,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: _qcApplyUpdate,
+                child: Text(translate('qc-update-now')),
+              )),
+      ]),
     );
   }
 
@@ -775,6 +837,11 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   void initState() {
     super.initState();
     if (isMacOS) {
+      Future.delayed(const Duration(seconds: 8), _qcCheckUpdate);
+      _qcUpdateTimer =
+          Timer.periodic(const Duration(hours: 3), (_) => _qcCheckUpdate());
+    }
+    if (isMacOS) {
       // Qianchen Desk: also pick up permissions granted directly in System Settings.
       watchIsCanScreenRecording = !bind.mainIsCanScreenRecording(prompt: false);
       watchIsProcessTrust = !bind.mainIsProcessTrusted(prompt: false);
@@ -955,6 +1022,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
     _uniLinksSubscription?.cancel();
     Get.delete<RxBool>(tag: 'stop-service');
     _updateTimer?.cancel();
+    _qcUpdateTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }

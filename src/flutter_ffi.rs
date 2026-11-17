@@ -2270,6 +2270,39 @@ pub fn main_restart_peer(id: String) -> String {
 }
 
 /// Qianchen Desk: lock a peer's screen from the device list. Returns "" on success.
+/// Qianchen Desk: newer build number on our server, or "" when up to date.
+pub fn main_qc_check_update() -> String {
+    #[cfg(target_os = "macos")]
+    return match crate::updater::qc_newer_build() {
+        Ok(Some((build, ..))) => build.to_string(),
+        Ok(None) => "".to_owned(),
+        Err(e) => {
+            log::warn!("Qianchen Desk update check failed: {e}");
+            "".to_owned()
+        }
+    };
+    #[cfg(not(target_os = "macos"))]
+    "".to_owned()
+}
+
+/// Qianchen Desk: download the new build, quit and let a helper swap the app in.
+/// Returns "" on success (the app exits shortly after), otherwise the error.
+pub fn main_qc_apply_update() -> String {
+    #[cfg(target_os = "macos")]
+    return match crate::updater::qc_apply_update_macos() {
+        Ok(()) => {
+            std::thread::spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                std::process::exit(0);
+            });
+            "".to_owned()
+        }
+        Err(e) => e.to_string(),
+    };
+    #[cfg(not(target_os = "macos"))]
+    "Not supported".to_owned()
+}
+
 pub fn main_lock_peer(id: String) -> String {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     return qianchen_block_on(crate::qianchen_power::lock_peer(id));

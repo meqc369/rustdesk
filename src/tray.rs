@@ -80,17 +80,18 @@ fn make_tray() -> hbb_common::ResultType<()> {
     } else {
         tray_menu.append_items(&[&open_i]).ok();
     }
+    // Qianchen Desk: the name users know.
     let tooltip = |count: usize| {
         if count == 0 {
             format!(
                 "{} {}",
-                crate::get_app_name(),
+                "千尘desk",
                 translate("Service is running".to_owned()),
             )
         } else {
             format!(
                 "{} - {}\n{}",
-                crate::get_app_name(),
+                "千尘desk",
                 translate("Ready".to_owned()),
                 translate("{".to_string() + &format!("{count}") + "} sessions"),
             )

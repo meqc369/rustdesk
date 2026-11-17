@@ -1492,6 +1492,31 @@ pub fn check_update_broker_process() -> ResultType<()> {
     Ok(())
 }
 
+/// Qianchen Desk: the name users see in shortcuts, the Start menu and Apps & features.
+/// Files, the service and config paths keep the RustDesk name so upgrades stay compatible.
+const QC_DISPLAY_NAME: &str = "千尘desk";
+
+/// Qianchen Desk: rename shortcuts and the Apps & features entry left by older installs.
+/// Must run after `chcp 65001`.
+fn qc_rename_cmds(subkey: &str, path: &str, start_menu: &str) -> String {
+    let app_name = crate::get_app_name();
+    let old_menu =
+        format!("%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\{app_name}");
+    let n = QC_DISPLAY_NAME;
+    format!(
+        "
+if exist \"%PUBLIC%\\Desktop\\{app_name}.lnk\" move /Y \"%PUBLIC%\\Desktop\\{app_name}.lnk\" \"%PUBLIC%\\Desktop\\{n}.lnk\"
+if exist \"{old_menu}\" if not exist \"{start_menu}\" move \"{old_menu}\" \"{start_menu}\"
+if exist \"{old_menu}\" rd /s /q \"{old_menu}\"
+if exist \"{start_menu}\\{app_name}.lnk\" move /Y \"{start_menu}\\{app_name}.lnk\" \"{start_menu}\\{n}.lnk\"
+if exist \"{start_menu}\\Uninstall {app_name}.lnk\" move /Y \"{start_menu}\\Uninstall {app_name}.lnk\" \"{start_menu}\\卸载{n}.lnk\"
+if exist \"{path}\\Uninstall {app_name}.lnk\" move /Y \"{path}\\Uninstall {app_name}.lnk\" \"{path}\\卸载{n}.lnk\"
+reg add {subkey} /f /v DisplayName /t REG_SZ /d \"{n}\"
+reg add {subkey} /f /v Publisher /t REG_SZ /d \"{n}\"
+"
+    )
+}
+
 fn get_install_info_with_subkey(subkey: String) -> (String, String, String, String) {
     let mut path = get_reg_of(&subkey, "InstallLocation");
     if path.is_empty() {
@@ -1500,7 +1525,7 @@ fn get_install_info_with_subkey(subkey: String) -> (String, String, String, Stri
     path = path.trim_end_matches('\\').to_owned();
     let start_menu = format!(
         "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\{}",
-        crate::get_app_name()
+        QC_DISPLAY_NAME
     );
     let exe = format!("{}\\{}.exe", path, crate::get_app_name());
     (subkey, path, start_menu, exe)
@@ -1678,11 +1703,11 @@ pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> Res
     let tmp_path = "%RUSTDESK_OUTPUT_DIR%".to_owned();
     let (mk_shortcut_commands, mk_shortcut_file) = staged_shortcut_commands(
         shortcut_bytes(&exe, None, shortcut_icon_location.as_deref())?,
-        &format!("{app_name}.lnk"),
+        &format!("{QC_DISPLAY_NAME}.lnk"),
     )?;
     let (uninstall_shortcut_commands, uninstall_shortcut_file) = staged_shortcut_commands(
         shortcut_bytes(&exe, Some("--uninstall"), Some("msiexec.exe"))?,
-        &format!("Uninstall {app_name}.lnk"),
+        &format!("卸载{QC_DISPLAY_NAME}.lnk"),
     )?;
     let (tray_shortcut_commands, tray_shortcut_file) =
         staged_tray_shortcut_commands(&app_name, &exe, shortcut_icon_location.as_deref())?;
@@ -1693,8 +1718,7 @@ pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> Res
     if options.contains("desktopicon") {
         shortcuts = format!(
             "copy /Y \"{}\\{}.lnk\" \"%PUBLIC%\\Desktop\\\"",
-            tmp_path,
-            crate::get_app_name()
+            tmp_path, QC_DISPLAY_NAME
         );
         reg_value_desktop_shortcuts = "1".to_owned();
     }
@@ -1702,8 +1726,8 @@ pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> Res
         shortcuts = format!(
             "{shortcuts}
 md \"{start_menu}\"
-copy /Y \"{tmp_path}\\{app_name}.lnk\" \"{start_menu}\\\"
-copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{start_menu}\\\"
+copy /Y \"{tmp_path}\\{QC_DISPLAY_NAME}.lnk\" \"{start_menu}\\\"
+copy /Y \"{tmp_path}\\卸载{QC_DISPLAY_NAME}.lnk\" \"{start_menu}\\\"
      "
         );
         reg_value_start_menu_shortcuts = "1".to_owned();
@@ -1726,8 +1750,8 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{start_menu}\\\"
     // Note: without if exist, the bat may exit in advance on some Windows7 https://github.com/rustdesk/rustdesk/issues/895
     let dels = format!(
         "
-if exist \"{tmp_path}\\{app_name}.lnk\" del /f /q \"{tmp_path}\\{app_name}.lnk\"
-if exist \"{tmp_path}\\Uninstall {app_name}.lnk\" del /f /q \"{tmp_path}\\Uninstall {app_name}.lnk\"
+if exist \"{tmp_path}\\{QC_DISPLAY_NAME}.lnk\" del /f /q \"{tmp_path}\\{QC_DISPLAY_NAME}.lnk\"
+if exist \"{tmp_path}\\卸载{QC_DISPLAY_NAME}.lnk\" del /f /q \"{tmp_path}\\卸载{QC_DISPLAY_NAME}.lnk\"
 if exist \"{tmp_path}\\{app_name} Tray.lnk\" del /f /q \"{tmp_path}\\{app_name} Tray.lnk\"
         "
     );
@@ -1778,15 +1802,16 @@ copy /Y \"{tmp_path}\\{app_name} Tray.lnk\" \"%PROGRAMDATA%\\Microsoft\\Windows\
 {uninstall_str}
 chcp 65001
 md \"{path}\"
+{qc_rename}
 {copy_exe}
 reg add {subkey} /f
 reg add {subkey} /f /v DisplayIcon /t REG_SZ /d \"{display_icon}\"
-reg add {subkey} /f /v DisplayName /t REG_SZ /d \"{app_name}\"
+reg add {subkey} /f /v DisplayName /t REG_SZ /d \"{QC_DISPLAY_NAME}\"
 reg add {subkey} /f /v DisplayVersion /t REG_SZ /d \"{version}\"
 reg add {subkey} /f /v Version /t REG_SZ /d \"{version}\"
 reg add {subkey} /f /v BuildDate /t REG_SZ /d \"{build_date}\"
 reg add {subkey} /f /v InstallLocation /t REG_SZ /d \"{path}\"
-reg add {subkey} /f /v Publisher /t REG_SZ /d \"{app_name}\"
+reg add {subkey} /f /v Publisher /t REG_SZ /d \"{QC_DISPLAY_NAME}\"
 reg add {subkey} /f /v VersionMajor /t REG_DWORD /d {version_major}
 reg add {subkey} /f /v VersionMinor /t REG_DWORD /d {version_minor}
 reg add {subkey} /f /v VersionBuild /t REG_DWORD /d {version_build}
@@ -1797,7 +1822,7 @@ reg add {subkey} /f /v WindowsInstaller /t REG_DWORD /d 0
 {uninstall_shortcut_commands}
 {tray_shortcuts}
 {shortcuts}
-copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
+copy /Y \"{tmp_path}\\卸载{QC_DISPLAY_NAME}.lnk\" \"{path}\\\"
 {dels}
 {import_config}
 {after_install}
@@ -1805,6 +1830,7 @@ copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{path}\\\"
     ",
         display_icon = shortcut_icon_location.as_deref().unwrap_or(exe.as_str()),
         nested_exe = escape_nested_cmd_ampersands(&exe),
+        qc_rename = qc_rename_cmds(&subkey, &path, &start_menu),
         version = crate::VERSION.replace("-", "."),
         build_date = crate::BUILD_DATE,
         sleep = if debug { "timeout 300" } else { "" },
@@ -1903,6 +1929,7 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> ResultType<String>
     if exist \"{path}\" rd /s /q \"{path}\"
     if exist \"{start_menu}\" rd /s /q \"{start_menu}\"
     if exist \"%PUBLIC%\\Desktop\\{app_name}.lnk\" del /f /q \"%PUBLIC%\\Desktop\\{app_name}.lnk\"
+    if exist \"%PUBLIC%\\Desktop\\{QC_DISPLAY_NAME}.lnk\" del /f /q \"%PUBLIC%\\Desktop\\{QC_DISPLAY_NAME}.lnk\"
     if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\"
     ",
         before_uninstall=get_before_uninstall(kill_self)?,
@@ -3505,7 +3532,7 @@ fn get_directory_size_kb(path: &str) -> u64 {
 pub fn update_me(debug: bool) -> ResultType<()> {
     let app_name = crate::get_app_name();
     let src_exe = std::env::current_exe()?.to_string_lossy().to_string();
-    let (subkey, path, _, exe) = get_install_info();
+    let (subkey, path, start_menu, exe) = get_install_info();
     let is_installed = std::fs::metadata(&exe).is_ok();
     if !is_installed {
         bail!("{} is not installed.", &app_name);
@@ -3654,6 +3681,7 @@ chcp 65001
 sc stop {app_name}
 taskkill /F /IM {app_name}.exe{filter}
 {reg_cmd}
+{qc_rename}
 {copy_exe}
 {rename_exe}
 {remove_meta_toml}
@@ -3665,6 +3693,7 @@ taskkill /F /IM {app_name}.exe{filter}
         app_name = app_name,
         copy_exe = copy_exe_cmd(&src_exe, &exe, &path)?,
         rename_exe = rename_exe_cmd(&src_exe, &path)?,
+        qc_rename = qc_rename_cmds(&subkey, &path, &start_menu),
         remove_meta_toml = remove_meta_toml_cmd(is_msi.unwrap_or(true), &path),
         sleep = if debug { "timeout 300" } else { "" },
     );

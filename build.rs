@@ -106,5 +106,11 @@ fn main() {
     if target_os == "android" {
         build_android_ifaddrs();
     }
+    // Qianchen Desk: build number for self-updates (the GitHub Actions run number, 0 locally).
+    println!(
+        "cargo:rustc-env=QC_BUILD={}",
+        std::env::var("GITHUB_RUN_NUMBER").unwrap_or_else(|_| "0".to_owned())
+    );
+    println!("cargo:rerun-if-env-changed=GITHUB_RUN_NUMBER");
     println!("cargo:rerun-if-changed=build.rs");
 }

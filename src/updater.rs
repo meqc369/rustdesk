@@ -90,6 +90,125 @@ pub const DUR_ONE_DAY: Duration = Duration::from_secs(60 * 60 * 24);
 /// Minimum interval between consecutive update checks (10 minutes).
 pub const MIN_INTERVAL: Duration = Duration::from_secs(60 * 10);
 
+/// Qianchen Desk: how often installed Windows PCs look for a new build (1 hour).
+pub const QC_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
+/// Qianchen Desk: build marker. release.sh reads it from the built app to write version.json.
+#[used]
+pub static QC_BUILD_TAG: &str = concat!("QCBUILD=", env!("QC_BUILD"), ";");
+
+pub fn qc_build() -> u64 {
+    QC_BUILD_TAG
+        .trim_start_matches("QCBUILD=")
+        .trim_end_matches(';')
+        .parse()
+        .unwrap_or(0)
+}
+
+/// A newer build published on our server: (build, url, sha256, size).
+pub fn qc_newer_build() -> ResultType<Option<(u64, String, String, u64)>> {
+    let current = qc_build();
+    if current == 0 {
+        return Ok(None); // local developer build
+    }
+    let api = crate::common::get_api_server(
+        config::Config::get_option("api-server"),
+        config::Config::get_option("custom-rendezvous-server"),
+    );
+    if api.is_empty() {
+        return Ok(None);
+    }
+    let url = format!("{}/download/version.json", api.trim_end_matches('/'));
+    let client = crate::hbbs_http::create_http_client_with_url_strict(&url)?;
+    let text = client.get(&url).send()?.text()?;
+    let v: serde_json::Value = serde_json::from_str(&text)?;
+    let build = v["build"].as_u64().unwrap_or(0);
+    if build <= current {
+        return Ok(None);
+    }
+    let a = &v[if cfg!(target_os = "windows") { "windows" } else { "macos" }];
+    let (Some(u), Some(sha), Some(size)) =
+        (a["url"].as_str(), a["sha256"].as_str(), a["size"].as_u64())
+    else {
+        return Ok(None);
+    };
+    // Only install files served by our own server.
+    if !u.starts_with(&format!("{}/download/", api.trim_end_matches('/'))) {
+        bail!("Refusing update from another host: {}", u);
+    }
+    Ok(Some((build, u.to_owned(), sha.to_lowercase(), size)))
+}
+
+/// Download and verify a newer build; returns its build number and local path.
+pub fn qc_download_newer() -> ResultType<Option<(u64, std::path::PathBuf, String)>> {
+    let Some((build, url, sha, size)) = qc_newer_build()? else {
+        return Ok(None);
+    };
+    let ext = if cfg!(target_os = "windows") { "exe" } else { "dmg" };
+    let file_path = std::env::temp_dir().join(format!("qianchendesk-update-{build}.{ext}"));
+    ensure_verified_update_artifact(&url, &file_path, size, &sha)?;
+    Ok(Some((build, file_path, sha)))
+}
+
+/// Windows service: silently install a newer build when nobody is connected.
+#[cfg(target_os = "windows")]
+fn qc_check_update() -> ResultType<()> {
+    let Some((build, file_path, sha)) = qc_download_newer()? else {
+        log::debug!("Qianchen Desk is up to date ({})", qc_build());
+        return Ok(());
+    };
+    if has_no_active_conns() {
+        log::info!("Qianchen Desk: updating {} -> {}", qc_build(), build);
+        update_new_version(false, &build.to_string(), &file_path, &sha);
+    }
+    Ok(())
+}
+
+/// macOS: replace /Applications/RustDesk.app with the downloaded build and relaunch.
+/// The swap runs in a detached shell after this process exits.
+#[cfg(target_os = "macos")]
+pub fn qc_apply_update_macos() -> ResultType<()> {
+    let app = "/Applications/RustDesk.app";
+    let Some((_, dmg, _)) = qc_download_newer()? else {
+        bail!("Already up to date");
+    };
+    let parent_writable = std::fs::metadata("/Applications")
+        .map(|m| !m.permissions().readonly())
+        .unwrap_or(false);
+    let app_owned = std::fs::metadata(app)
+        .map(|m| m.uid() == unsafe { hbb_common::libc::getuid() })
+        .unwrap_or(false);
+    if !parent_writable || !app_owned {
+        bail!("No permission to replace {}", app);
+    }
+    let script = r#"pid="$1"; dmg="$2"; app="$3"
+while kill -0 "$pid" 2>/dev/null; do sleep 0.3; done
+m=$(/usr/bin/mktemp -d /tmp/qcupd.XXXXXX)
+if /usr/bin/hdiutil attach -nobrowse -readonly -mountpoint "$m" "$dmg" >/dev/null; then
+  /bin/rm -rf "$app.qcnew"
+  /usr/bin/ditto "$m/RustDesk.app" "$app.qcnew"
+  /usr/bin/hdiutil detach "$m" -force >/dev/null
+  if /usr/bin/codesign --verify --deep "$app.qcnew"; then
+    /bin/rm -rf "$app.qcold"; /bin/mv "$app" "$app.qcold" && /bin/mv "$app.qcnew" "$app" && /bin/rm -rf "$app.qcold"
+  fi
+  /bin/rm -rf "$app.qcnew"
+fi
+/bin/rmdir "$m" 2>/dev/null; /bin/rm -f "$dmg"
+/usr/bin/open "$app""#;
+    std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(script)
+        .arg("qc-update")
+        .arg(std::process::id().to_string())
+        .arg(dmg.to_string_lossy().to_string())
+        .arg(app)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    Ok(())
+}
+
 /// Retry interval when an update check fails or a session is active (30 minutes).
 pub const RETRY_INTERVAL: Duration = Duration::from_secs(60 * 30);
 
@@ -159,7 +278,7 @@ fn start_auto_update_check_(rx_msg: Receiver<UpdateMsg>) {
     }
 
     let mut last_check_time = Instant::now();
-    let mut check_interval = DUR_ONE_DAY;
+    let mut check_interval = QC_CHECK_INTERVAL;
     loop {
         let recv_res = rx_msg.recv_timeout(check_interval);
         match &recv_res {
@@ -178,7 +297,7 @@ fn start_auto_update_check_(rx_msg: Receiver<UpdateMsg>) {
                     check_interval = RETRY_INTERVAL;
                 } else {
                     last_check_time = Instant::now();
-                    check_interval = DUR_ONE_DAY;
+                    check_interval = QC_CHECK_INTERVAL;
                 }
             }
             Ok(UpdateMsg::Exit) => break,
@@ -187,6 +306,12 @@ fn start_auto_update_check_(rx_msg: Receiver<UpdateMsg>) {
 }
 
 fn check_update(manually: bool) -> ResultType<()> {
+    // Qianchen Desk: updates come from our own server, never from the official releases.
+    #[cfg(target_os = "windows")]
+    {
+        let _ = manually;
+        return qc_check_update();
+    }
     // On macOS, auto-update is handled by check_update_as_root() in the service process.
     // The shared check_update() path is only used for manual update checks from the GUI.
     #[cfg(target_os = "macos")]
