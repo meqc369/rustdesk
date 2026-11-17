@@ -95,6 +95,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   // Uri links dispatch
   HWND hwnd = ::FindWindowW(getWindowClassName(), app_name.c_str());
+  // Qianchen Desk: the main window renames itself to 千尘desk once Flutter starts,
+  // so look for that title too, or a second copy of the app opens.
+  if (hwnd == NULL) {
+    hwnd = ::FindWindowW(getWindowClassName(), L"\u5343\u5c18desk");
+  }
   if (hwnd != NULL) {
     // Allow multiple flutter instances when being executed by parameters
     // contained in whitelists.
