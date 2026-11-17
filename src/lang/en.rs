@@ -37,7 +37,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("qc-more-ways", "More"),
         ("qc-perm-relaunch", "Already switched on? Quit and reopen the app for it to take effect."),
         ("qc-update-ready", "New version available"),
-        ("qc-update-now", "Update & restart"),
+        ("qc-update-now", "Update"),
         ("qc-update-failed", "Update failed, please install from the download page"),
         ("qc-device-id", "ID"),
         ("connecting_status", "Connecting to the RustDesk network..."),
