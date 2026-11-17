@@ -79,6 +79,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     _timer = Timer.periodic(const Duration(seconds: 6), (_) {
       _queryOnlines();
       if (++_tick % 5 == 0) _fetchIps();
+      if (_tick % 10 == 0) _syncAccount();
     });
     Future.delayed(const Duration(milliseconds: 800), () {
       _queryOnlines();
@@ -99,6 +100,20 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     if (id == _selectedId) return;
     setState(() => _selectedId = id);
     bind.setLocalFlutterOption(k: 'qc-last-device', v: id);
+  }
+
+  /// Every minute: check the login is still valid (changing the account password
+  /// signs every device out) and pull remark names edited on other computers.
+  Future<void> _syncAccount() async {
+    if (!gFFI.userModel.isLogin) return;
+    gFFI.userModel.refreshCurrentUser();
+    await Future.delayed(const Duration(seconds: 3));
+    if (!mounted) return;
+    if (!gFFI.userModel.isLogin) {
+      showToast(translate('qc-login-expired'));
+      return;
+    }
+    gFFI.abModel.pullAb(force: ForcePullAb.current, quiet: true);
   }
 
   void _pullAb() {
@@ -382,9 +397,11 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     showToast(translate(shutdown
         ? 'Sending shutdown command...'
         : 'Sending wake-up command...'));
-    final results = await Future.wait(targets.map((p) => shutdown
-        ? bind.mainShutdownPeer(id: p.id)
-        : bind.mainWakePeer(id: p.id)));
+    final results = await Future.wait(targets.map((p) async {
+      if (!shutdown) return await bind.mainWakePeer(id: p.id);
+      final r = await _serverCommand(p.id, 'shutdown');
+      return r == 'skip' ? await bind.mainShutdownPeer(id: p.id) : r;
+    }));
     final failed = results.where((e) => e.isNotEmpty).length;
     showToast('${translate('Done')}: ${targets.length - failed}'
         '${failed > 0 ? ', ${translate('Failed')}: $failed' : ''}');
@@ -934,7 +951,9 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     }
     final key = '${p.id}/$action';
     setState(() => _busy.add(key));
-    String err;
+    String err = 'skip';
+    if (action != 'wake') err = await _serverCommand(p.id, action);
+    if (err == 'skip') {
     switch (action) {
       case 'lock':
         err = await bind.mainLockPeer(id: p.id);
@@ -947,6 +966,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         break;
       default:
         err = await bind.mainWakePeer(id: p.id);
+    }
     }
     if (!mounted) return;
     setState(() => _busy.remove(key));
@@ -962,6 +982,44 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     }
   }
 
+  /// Lock, restart or shut down through the server with the signed-in account, so no
+  /// device password is needed. Returns "" on success, an error, or 'skip' to fall
+  /// back to a direct connection (not signed in, no permission, older device).
+  Future<String> _serverCommand(String id, String action) async {
+    if (!gFFI.userModel.isLogin) return 'skip';
+    try {
+      final api = '${await bind.mainGetApiServer()}/qc-api/peer-cmd';
+      final headers = getHttpHeaders();
+      headers['Content-Type'] = 'application/json';
+      final resp = await http.post(Uri.parse(api),
+          headers: headers, body: jsonEncode({'peer_id': id, 'action': action}));
+      final body = jsonDecode(decode_http_response(resp));
+      if (resp.statusCode == 409) return 'qc-device-offline';
+      if (body is! Map || body['code'] != 0) return 'skip';
+      final cid = body['data']['cid'];
+      // The device picks the command up with its next heartbeat (every 15 s).
+      for (var i = 0; i < 20; i++) {
+        await Future.delayed(const Duration(seconds: 2));
+        final r = await http.get(Uri.parse('$api?cid=$cid'), headers: headers);
+        final d = jsonDecode(decode_http_response(r));
+        final data = d is Map ? d['data'] : null;
+        final status = data is Map ? data['status'] : null;
+        if (status == 'ok') return '';
+        if (status == 'failed') {
+          final msg = '${data!['msg']}';
+          return msg.startsWith('unknown action') ? 'skip' : msg;
+        }
+        if (status == 'expired') return 'qc-cmd-timeout';
+        // Restart and shut down act a few seconds after the device acknowledges.
+        if (status == 'delivered' && action != 'lock' && i >= 3) return '';
+      }
+      return 'qc-cmd-timeout';
+    } catch (e) {
+      debugPrint('peer-cmd: $e');
+      return 'skip';
+    }
+  }
+
   /// Remark name (alias) for any device; the note is kept in the address book.
   void _editRemark(Peer p, bool canEditAb) {
     final alias = TextEditingController(text: p.alias);
@@ -971,6 +1029,12 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         final newAlias = alias.text.trim();
         final newNote = note.text.trim();
         close();
+        final inAb = gFFI.abModel.currentAbPeers.any((e) => e.id == p.id);
+        if (!inAb && gFFI.userModel.isLogin && gFFI.abModel.current.canWrite()) {
+          // Keep the name in the account so every signed-in computer sees it.
+          await gFFI.abModel.addIdToCurrent(
+              p.id, newAlias, '', _tag.isEmpty ? [] : [_tag], newNote);
+        }
         if (newAlias != p.alias) {
           if (canEditAb) {
             await gFFI.abModel.changeAlias(id: p.id, alias: newAlias);

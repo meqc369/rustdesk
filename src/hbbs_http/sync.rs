@@ -364,6 +364,11 @@ async fn handle_qc_cmd(id: &str, signed: &str) {
             });
             (true, String::new())
         }
+        "lock" => {
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+            crate::platform::lock_screen();
+            (true, String::new())
+        }
         _ => (false, format!("unknown action {action}")),
     };
     *QC_ACK.lock().unwrap() = Some(json!({ "cid": cid, "ok": ok, "msg": msg, "hash": hash }));
