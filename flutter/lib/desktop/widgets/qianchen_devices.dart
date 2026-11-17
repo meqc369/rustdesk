@@ -692,10 +692,12 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
                   Row(children: [
                     Flexible(
                       child: Text(_name(p),
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              fontSize: 19, fontWeight: FontWeight.w700)),
+                              fontSize: 18,
+                              height: 1.25,
+                              fontWeight: FontWeight.w700)),
                     ),
                     IconButton(
                       tooltip: translate('qc-edit-remark'),
