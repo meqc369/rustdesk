@@ -24,7 +24,6 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:window_size/window_size.dart' as window_size;
-import '../widgets/button.dart';
 
 class DesktopHomePage extends StatefulWidget {
   const DesktopHomePage({Key? key}) : super(key: key);
@@ -578,7 +577,10 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           launchUrl(Uri.parse(
               'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'));
           watchIsCanScreenRecording = true;
-        }, help: 'Help', link: translate("doc_mac_permission"));
+        },
+            help: 'Help',
+            link: translate("doc_mac_permission"),
+            note: 'qc-perm-relaunch');
       } else if (!isOutgoingOnly && !bind.mainIsProcessTrusted(prompt: false)) {
         return buildInstallCard("Permissions", "config_acc", "Configure",
             () async {
@@ -674,7 +676,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       String? help,
       String? link,
       bool? closeButton,
-      String? closeOption}) {
+      String? closeOption,
+      String? note}) {
     if (bind.mainGetBuildinOption(key: kOptionHideHelpCards) == 'Y' &&
         content != 'install_daemon_tip') {
       return const SizedBox();
@@ -694,105 +697,88 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       }
     }
 
-    return Stack(
-      children: [
-        Container(
-          margin: EdgeInsets.fromLTRB(
-              14, marginTop, 14, bind.isIncomingOnly() ? marginTop : 0),
-          child: Container(
-              decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  gradient: LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [
-                  Color(0xFF12806F),
-                  Color(0xFF2BA58C),
-                ],
-              )),
-              padding: EdgeInsets.all(16),
-              child: Column(
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: (title.isNotEmpty
-                          ? <Widget>[
-                              Center(
-                                  child: Text(
-                                translate(title),
-                                style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 15),
-                              ).marginOnly(bottom: 6)),
-                            ]
-                          : <Widget>[]) +
-                      <Widget>[
-                        if (content.isNotEmpty)
-                          Text(
-                            translate(content),
-                            style: TextStyle(
-                                height: 1.5,
-                                color: Colors.white,
-                                fontWeight: FontWeight.normal,
-                                fontSize: 13),
-                          ).marginOnly(bottom: 20)
-                      ] +
-                      (btnText.isNotEmpty
-                          ? <Widget>[
-                              Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    FixedWidthButton(
-                                      width: 150,
-                                      padding: 6,
-                                      isOutline: true,
-                                      text: translate(btnText),
-                                      textColor: Colors.white,
-                                      borderColor: Colors.white,
-                                      textSize: 15,
-                                      radius: 8,
-                                      onTap: onPressed,
-                                    )
-                                  ])
-                            ]
-                          : <Widget>[]) +
-                      (help != null
-                          ? <Widget>[
-                              Center(
-                                  child: InkWell(
-                                      onTap: () async =>
-                                          await launchUrl(Uri.parse(link!)),
-                                      child: Text(
-                                        translate(help),
-                                        style: TextStyle(
-                                            decoration:
-                                                TextDecoration.underline,
-                                            color: Colors.white,
-                                            fontSize: 12),
-                                      )).marginOnly(top: 6)),
-                            ]
-                          : <Widget>[]))),
-        ),
-        if (closeButton != null && closeButton == true)
-          Positioned(
-            top: 18,
-            right: 0,
-            child: IconButton(
-              icon: Icon(
-                Icons.close,
-                color: Colors.white,
-                size: 20,
+    // Qianchen Desk: a quiet amber notice instead of a full-width brand card.
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    const amber = Color(0xFFC77A12);
+    final ink = Theme.of(context).textTheme.titleLarge?.color;
+    final muted = Theme.of(context).textTheme.bodySmall?.color;
+    return Container(
+      margin: EdgeInsets.fromLTRB(
+          12, marginTop * 0.7, 12, bind.isIncomingOnly() ? marginTop : 0),
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+      decoration: BoxDecoration(
+        color: dark ? const Color(0x22F2A93B) : const Color(0xFFFFF6E6),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: amber.withOpacity(0.28)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Icon(Icons.shield_outlined, size: 18, color: amber)
+                .paddingOnly(top: 1),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                translate(title.isNotEmpty ? title : 'qc-notice'),
+                style: TextStyle(
+                    fontSize: 14, fontWeight: FontWeight.w700, color: ink),
               ),
-              onPressed: closeCard,
             ),
-          ),
-      ],
+            if (closeButton == true)
+              InkWell(
+                onTap: closeCard,
+                child: Icon(Icons.close_rounded, size: 16, color: muted),
+              ).paddingOnly(right: 4),
+          ]),
+          if (content.isNotEmpty)
+            Text(translate(content),
+                    style: TextStyle(fontSize: 12.5, height: 1.5, color: ink))
+                .paddingOnly(top: 6, right: 6),
+          if (note != null)
+            Text(translate(note),
+                    style: TextStyle(fontSize: 12, height: 1.45, color: muted))
+                .paddingOnly(top: 4, right: 6),
+          const SizedBox(height: 10),
+          Row(children: [
+            if (btnText.isNotEmpty)
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: amber,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  visualDensity: VisualDensity.compact,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(9)),
+                ),
+                onPressed: onPressed,
+                child: Text(translate(btnText),
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+              ),
+            if (help != null)
+              TextButton(
+                style: TextButton.styleFrom(
+                    foregroundColor: amber,
+                    visualDensity: VisualDensity.compact),
+                onPressed: () async => await launchUrl(Uri.parse(link!)),
+                child: Text(translate(help)),
+              ).paddingOnly(left: 4),
+          ]),
+        ],
+      ),
     );
   }
 
   @override
   void initState() {
     super.initState();
+    if (isMacOS) {
+      // Qianchen Desk: also pick up permissions granted directly in System Settings.
+      watchIsCanScreenRecording = !bind.mainIsCanScreenRecording(prompt: false);
+      watchIsProcessTrust = !bind.mainIsProcessTrusted(prompt: false);
+    }
     _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {
       await gFFI.serverModel.fetchID();
       final error = await bind.mainGetError();

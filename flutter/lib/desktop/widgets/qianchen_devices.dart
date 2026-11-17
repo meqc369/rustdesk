@@ -3,6 +3,8 @@
 // device with its connection and power actions.
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +17,7 @@ import '../../consts.dart';
 import '../../models/ab_model.dart';
 import '../../models/peer_model.dart';
 import '../../models/platform_model.dart';
+import '../../utils/http_service.dart' as http;
 
 class QianchenDevicesPanel extends StatefulWidget {
   final VoidCallback onShowClassic;
@@ -35,6 +38,12 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
   Timer? _timer;
   Worker? _loginWorker;
   final Set<String> _busy = {};
+  // Public IP, region and LAN IPs per device, from the server.
+  Map<String, Map<String, dynamic>> _ips = {};
+  final Map<String, String> _savedLan = {};
+  String _myPublicIp = '';
+  List<String> _myLanIps = [];
+  int _tick = 0;
 
   @override
   void initState() {
@@ -65,9 +74,16 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         await Future.delayed(const Duration(milliseconds: 100));
       }
       if (mounted) _pullAb();
+      Future.delayed(const Duration(seconds: 2), _fetchIps);
     });
-    _timer = Timer.periodic(const Duration(seconds: 6), (_) => _queryOnlines());
-    Future.delayed(const Duration(milliseconds: 800), _queryOnlines);
+    _timer = Timer.periodic(const Duration(seconds: 6), (_) {
+      _queryOnlines();
+      if (++_tick % 5 == 0) _fetchIps();
+    });
+    Future.delayed(const Duration(milliseconds: 800), () {
+      _queryOnlines();
+      _fetchIps();
+    });
   }
 
   @override
@@ -100,6 +116,74 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
   }
 
   bool _isOnline(Peer p) => _online[p.id] ?? p.online;
+
+  Future<void> _fetchIps() async {
+    try {
+      final mine = <String>[];
+      for (final i in await NetworkInterface.list(type: InternetAddressType.IPv4)) {
+        for (final a in i.addresses) {
+          final o = a.rawAddress;
+          if (a.isLoopback || (o[0] == 169 && o[1] == 254)) continue;
+          if (o[0] == 198 && (o[1] == 18 || o[1] == 19)) continue; // VPN fake IPs
+          mine.add(a.address);
+        }
+      }
+      _myLanIps = mine;
+    } catch (_) {}
+    final ids = {
+      ..._myDevices().map((e) => e.id),
+      ...gFFI.recentPeersModel.peers.map((e) => e.id),
+    };
+    for (final id in ids) {
+      // LAN addresses the device reported on our last connection to it.
+      _savedLan[id] = bind.mainGetPeerOptionSync(id: id, key: 'qc-lan-ips');
+    }
+    if (ids.isEmpty || !gFFI.userModel.isLogin) {
+      if (mounted) setState(() {});
+      return;
+    }
+    try {
+      final api = await bind.mainGetApiServer();
+      final resp = await http.get(
+          Uri.parse('$api/qc-api/peer-ips?ids=${ids.join(',')}'),
+          headers: getHttpHeaders());
+      final body = jsonDecode(decode_http_response(resp));
+      if (body is Map && body['code'] == 0 && body['data'] is Map) {
+        final data = body['data'] as Map;
+        _myPublicIp = data['me']?.toString() ?? '';
+        _ips = (data['peers'] as Map? ?? {}).map((k, v) =>
+            MapEntry(k.toString(), Map<String, dynamic>.from(v as Map)));
+      }
+    } catch (e) {
+      debugPrint('peer-ips: $e');
+    }
+    if (mounted) setState(() {});
+  }
+
+  static bool _sameSubnet(String a, String b) {
+    final x = a.split('.'), y = b.split('.');
+    return x.length == 4 && y.length == 4 && x[0] == y[0] && x[1] == y[1] && x[2] == y[2];
+  }
+
+  String _publicIp(Peer p) => _ips[p.id]?['ip']?.toString() ?? '';
+
+  /// LAN address to show: the one on our own subnet if there is one.
+  String _lanIp(Peer p) {
+    var raw = _ips[p.id]?['lan']?.toString() ?? '';
+    if (raw.isEmpty) raw = _savedLan[p.id] ?? '';
+    final list = raw.split(',').where((e) => e.trim().isNotEmpty).toList();
+    if (list.isEmpty) return '';
+    return list.firstWhere((ip) => _myLanIps.any((m) => _sameSubnet(m, ip)),
+        orElse: () => list.first);
+  }
+
+  /// Same network as this computer: same subnet and, when known, the same public IP.
+  bool _isLan(Peer p) {
+    final lan = _lanIp(p);
+    if (lan.isEmpty || !_myLanIps.any((m) => _sameSubnet(m, lan))) return false;
+    final pub = _publicIp(p);
+    return pub.isEmpty || _myPublicIp.isEmpty || pub == _myPublicIp;
+  }
 
   String _name(Peer p) {
     if (p.alias.isNotEmpty) return p.alias;
@@ -201,6 +285,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
                 gFFI.abModel.pullAb(force: ForcePullAb.current, quiet: true);
               }
               _queryOnlines();
+              _fetchIps();
             },
           ),
           PopupMenuButton<String>(
@@ -431,18 +516,15 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
 
   Widget _buildItem(BuildContext context, Peer p, bool selected) {
     final online = _isOnline(p);
-    final name = _name(p);
-    final extra = p.note.isNotEmpty
-        ? p.note
-        : (p.alias.isNotEmpty ? p.hostname : '');
-    final sub =
-        extra.isNotEmpty ? '${formatID(p.id)} · $extra' : formatID(p.id);
+    final muted = Theme.of(context).textTheme.bodySmall?.color;
+    final isLan = _isLan(p);
+    final ip = isLan ? _lanIp(p) : _publicIp(p);
     return Material(
-      color: selected ? MyTheme.accent.withOpacity(0.12) : Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
+      color: selected ? MyTheme.accent.withOpacity(0.11) : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        hoverColor: MyTheme.accent.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(12),
+        hoverColor: MyTheme.accent.withOpacity(0.05),
         onTap: () => _select(p.id),
         onDoubleTap: () => connect(context, p.id),
         onSecondaryTapDown: (d) {
@@ -450,32 +532,86 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
           _showItemMenu(context, p, d.globalPosition);
         },
         child: Row(children: [
-          _statusDot(online),
-          const SizedBox(width: 10),
-          _platformIcon(p.platform, 20, online),
-          const SizedBox(width: 10),
+          _avatar(context, p, 38, online),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name,
+                Text(_name(p),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         fontSize: 14,
                         fontWeight: selected ? FontWeight.w600 : FontWeight.w500)),
-                Text(sub,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).textTheme.bodySmall?.color)),
+                const SizedBox(height: 2),
+                Row(children: [
+                  Text(formatID(p.id),
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: muted,
+                          fontFeatures: const [FontFeature.tabularFigures()])),
+                  if (ip.isNotEmpty) ...[
+                    Text('  ·  ', style: TextStyle(fontSize: 12, color: muted)),
+                    if (isLan)
+                      Tooltip(
+                        message: translate('qc-lan-same-tip'),
+                        child: const Icon(Icons.lan_rounded,
+                            size: 13, color: MyTheme.accent),
+                      ).paddingOnly(right: 3),
+                    Flexible(
+                      child: Text(ip,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: isLan ? MyTheme.accent : muted,
+                              fontWeight:
+                                  isLan ? FontWeight.w500 : FontWeight.normal)),
+                    ),
+                  ],
+                ]),
               ],
             ),
           ),
-        ]).paddingSymmetric(horizontal: 12, vertical: 8),
+        ]).paddingSymmetric(horizontal: 10, vertical: 9),
       ),
-    ).paddingSymmetric(horizontal: 6, vertical: 1);
+    ).paddingSymmetric(horizontal: 8, vertical: 2);
+  }
+
+  /// Platform icon on a tinted tile with a presence dot.
+  Widget _avatar(BuildContext context, Peer p, double size, bool online) {
+    final dot = size * 0.27;
+    return SizedBox(
+      width: size + 2,
+      height: size + 2,
+      child: Stack(children: [
+        Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: (online ? MyTheme.accent : Colors.grey)
+                .withOpacity(online ? 0.12 : 0.10),
+            borderRadius: BorderRadius.circular(size * 0.28),
+          ),
+          child: Center(child: _platformIcon(p.platform, size * 0.52, online)),
+        ),
+        Positioned(
+          right: 0,
+          bottom: 0,
+          child: Container(
+            width: dot,
+            height: dot,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: online ? const Color(0xFF22B573) : const Color(0xFFB8BEC4),
+              border: Border.all(
+                  color: Theme.of(context).scaffoldBackgroundColor, width: 2),
+            ),
+          ),
+        ),
+      ]),
+    );
   }
 
   Widget _platformIcon(String platform, double size, bool online) {
@@ -496,15 +632,6 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         color: online ? MyTheme.accent : Colors.grey.withOpacity(0.6));
   }
 
-  Widget _statusDot(bool online) => Container(
-        width: 9,
-        height: 9,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: online ? const Color(0xFF22B573) : Colors.grey.withOpacity(0.45),
-        ),
-      );
-
   Widget _buildEmptyDetail(BuildContext context, bool loggedIn) {
     return Center(
       child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -523,56 +650,85 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     final online = _isOnline(p);
     final muted = Theme.of(context).textTheme.bodySmall?.color;
     final canEdit = inAb && gFFI.abModel.current.canWrite();
+    final lanIp = _lanIp(p);
+    final isLan = _isLan(p);
+    final pub = _publicIp(p);
+    final region = _ips[p.id]?['region']?.toString() ?? '';
     final system = [
       if (p.platform.isNotEmpty) p.platform,
       if (p.username.isNotEmpty || p.hostname.isNotEmpty)
         [p.username, p.hostname].where((e) => e.isNotEmpty).join('@'),
     ].join(' · ');
+    final desktopPeer = p.platform == kPeerPlatformWindows ||
+        p.platform == kPeerPlatformMacOS ||
+        p.platform == kPeerPlatformLinux ||
+        p.platform.isEmpty;
+    final line = Theme.of(context).dividerColor.withOpacity(0.6);
     return ListView(
-      padding: const EdgeInsets.fromLTRB(22, 18, 22, 18),
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
       children: [
-        Row(children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              color: (online ? MyTheme.accent : Colors.grey).withOpacity(0.10),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Center(child: _platformIcon(p.platform, 28, online)),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [
-                  Flexible(
-                    child: Text(_name(p),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.w600)),
-                  ),
-                  IconButton(
-                    tooltip: translate('qc-edit-remark'),
-                    visualDensity: VisualDensity.compact,
-                    icon: Icon(Icons.edit_rounded, size: 16, color: muted),
-                    onPressed: () => _editRemark(p, canEdit),
-                  ),
-                ]),
-                Row(children: [
-                  _chip(online ? translate('Online') : translate('Offline'),
-                      online ? const Color(0xFF22B573) : Colors.grey),
-                  if (inAb) ...[
-                    const SizedBox(width: 6),
-                    _chip(translate('My devices'), MyTheme.accent),
-                  ],
-                ]),
+        // Device header with the main action.
+        Container(
+          padding: const EdgeInsets.fromLTRB(18, 16, 16, 16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                MyTheme.accent.withOpacity(online ? 0.13 : 0.05),
+                MyTheme.accent.withOpacity(0.02),
               ],
             ),
+            border: Border.all(color: MyTheme.accent.withOpacity(0.12)),
           ),
-        ]),
+          child: Row(children: [
+            _avatar(context, p, 54, online),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Flexible(
+                      child: Text(_name(p),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 19, fontWeight: FontWeight.w700)),
+                    ),
+                    IconButton(
+                      tooltip: translate('qc-edit-remark'),
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(Icons.edit_rounded, size: 15, color: muted),
+                      onPressed: () => _editRemark(p, canEdit),
+                    ),
+                  ]),
+                  Wrap(spacing: 6, runSpacing: 4, children: [
+                    _chip(online ? translate('Online') : translate('Offline'),
+                        online ? const Color(0xFF1E9E63) : Colors.grey),
+                    if (isLan)
+                      _chip(translate('qc-lan'), MyTheme.accent,
+                          icon: Icons.lan_rounded),
+                    if (inAb) _chip(translate('My devices'), const Color(0xFF5B6B9A)),
+                  ]),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              icon: const Icon(Icons.desktop_windows_rounded, size: 18),
+              label: Text(translate('Remote control'),
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              onPressed: () => connect(context, p.id),
+            ),
+          ]),
+        ),
         if (!inAb && gFFI.userModel.isLogin)
           Align(
             alignment: Alignment.centerLeft,
@@ -583,28 +739,45 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
             ),
           ).paddingOnly(top: 6),
         const SizedBox(height: 16),
+        // Facts about the device.
         Container(
-          padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           decoration: BoxDecoration(
-            color: Theme.of(context).hoverColor.withOpacity(0.5),
-            borderRadius: BorderRadius.circular(12),
+            color: Theme.of(context).hoverColor.withOpacity(0.45),
+            borderRadius: BorderRadius.circular(14),
           ),
           child: Column(children: [
-            _infoRow(context, translate('qc-device-id'), formatID(p.id),
+            _infoRow(context, Icons.tag_rounded, translate('qc-device-id'),
+                formatID(p.id),
                 copy: p.id),
-            if (system.isNotEmpty)
-              _infoRow(context, translate('System'), system),
-            if (p.note.isNotEmpty)
-              _infoRow(context, translate('qc-note'), p.note),
+            if (lanIp.isNotEmpty) ...[
+              Divider(height: 1, color: line),
+              _infoRow(context, Icons.lan_rounded, translate('qc-lan-ip'), lanIp,
+                  copy: lanIp,
+                  accent: isLan,
+                  hint: isLan ? translate('qc-lan-same-tip') : null),
+            ],
+            if (pub.isNotEmpty) ...[
+              Divider(height: 1, color: line),
+              _infoRow(context, Icons.public_rounded, translate('qc-public-ip'),
+                  pub,
+                  copy: pub, hint: region.isEmpty ? null : region),
+            ],
+            if (system.isNotEmpty) ...[
+              Divider(height: 1, color: line),
+              _infoRow(context, Icons.computer_rounded, translate('System'), system),
+            ],
+            if (p.note.isNotEmpty) ...[
+              Divider(height: 1, color: line),
+              _infoRow(context, Icons.sticky_note_2_outlined, translate('qc-note'),
+                  p.note),
+            ],
           ]),
         ),
-        const SizedBox(height: 18),
-        _sectionTitle(context, translate('Connect')),
+        const SizedBox(height: 22),
+        _sectionTitle(context, translate('qc-more-ways')),
         const SizedBox(height: 10),
-        LayoutBuilder(builder: (context, c) {
-          final tiles = <Widget>[
-          _tile(Icons.desktop_windows_rounded, 'Remote control',
-              () => connect(context, p.id)),
+        Wrap(spacing: 10, runSpacing: 10, children: [
           _tile(Icons.drive_file_move_rounded, 'File transfer',
               () => connect(context, p.id, isFileTransfer: true)),
           _tile(Icons.terminal_rounded, 'Terminal',
@@ -613,22 +786,9 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
               p.platform == kPeerPlatformLinux)
             _tile(Icons.videocam_rounded, 'View camera',
                 () => connect(context, p.id, isViewCamera: true)),
-          ];
-          // One row of tiles that shrinks with the window.
-          final w = ((c.maxWidth - 10 * (tiles.length - 1)) / tiles.length)
-              .clamp(64.0, 110.0);
-          return Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: tiles
-                  .map((t) => SizedBox(width: w, height: 78, child: t))
-                  .toList());
-        }),
-        const SizedBox(height: 22),
-        if (p.platform == kPeerPlatformWindows ||
-            p.platform == kPeerPlatformMacOS ||
-            p.platform == kPeerPlatformLinux ||
-            p.platform.isEmpty) ...[
+        ]),
+        if (desktopPeer) ...[
+          const SizedBox(height: 22),
           _sectionTitle(context, translate('Power')),
           const SizedBox(height: 10),
           if (online)
@@ -651,59 +811,73 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     );
   }
 
-  Widget _chip(String text, Color color) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+  Widget _chip(String text, Color color, {IconData? icon}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
             color: color.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(10)),
-        child: Text(text, style: TextStyle(fontSize: 12, color: color)),
+            borderRadius: BorderRadius.circular(8)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          if (icon != null) Icon(icon, size: 12, color: color).paddingOnly(right: 4),
+          Text(text,
+              style: TextStyle(
+                  fontSize: 12, color: color, fontWeight: FontWeight.w500)),
+        ]),
       );
 
-  Widget _infoRow(BuildContext context, String label, String value,
-      {String? copy}) {
+  Widget _infoRow(BuildContext context, IconData icon, String label, String value,
+      {String? copy, bool accent = false, String? hint}) {
+    final muted = Theme.of(context).textTheme.bodySmall?.color;
     return Row(children: [
+      Icon(icon, size: 16, color: accent ? MyTheme.accent : muted),
+      const SizedBox(width: 10),
       SizedBox(
-        width: 72,
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 13,
-                color: Theme.of(context).textTheme.bodySmall?.color)),
+        width: 76,
+        child: Text(label, style: TextStyle(fontSize: 13, color: muted)),
       ),
       Expanded(
-          child: SelectableText(value, style: const TextStyle(fontSize: 14))),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SelectableText(value,
+                style: TextStyle(
+                    fontSize: 14,
+                    color: accent ? MyTheme.accent : null,
+                    fontWeight: accent ? FontWeight.w600 : FontWeight.normal)),
+            if (hint != null)
+              Text(hint, style: TextStyle(fontSize: 12, color: muted)),
+          ],
+        ),
+      ),
       if (copy != null)
         IconButton(
           tooltip: translate('Copy'),
-          icon: const Icon(Icons.copy_rounded, size: 16),
+          visualDensity: VisualDensity.compact,
+          icon: Icon(Icons.copy_rounded, size: 15, color: muted),
           onPressed: () {
             Clipboard.setData(ClipboardData(text: copy));
             showToast(translate('Copied'));
           },
-        ),
-    ]).paddingSymmetric(vertical: 2);
+        )
+      else
+        const SizedBox(height: 40),
+    ]).paddingSymmetric(vertical: 4);
   }
 
   Widget _tile(IconData icon, String label, VoidCallback onTap) {
-    return SizedBox(
-      child: Material(
-        color: MyTheme.accent.withOpacity(0.07),
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: MyTheme.accent.withOpacity(0.15))),
-        child: InkWell(
+    return Material(
+      color: MyTheme.accent.withOpacity(0.06),
+      shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          hoverColor: MyTheme.accent.withOpacity(0.10),
-          onTap: onTap,
-          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(icon, size: 26, color: MyTheme.accent),
-            const SizedBox(height: 6),
-            Text(translate(label),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13),
-                textAlign: TextAlign.center),
-          ]),
-        ),
+          side: BorderSide(color: MyTheme.accent.withOpacity(0.14))),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        hoverColor: MyTheme.accent.withOpacity(0.10),
+        onTap: onTap,
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 18, color: MyTheme.accent),
+          const SizedBox(width: 8),
+          Text(translate(label), style: const TextStyle(fontSize: 13)),
+        ]).paddingSymmetric(horizontal: 16, vertical: 12),
       ),
     );
   }

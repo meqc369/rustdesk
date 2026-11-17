@@ -247,6 +247,11 @@ async fn start_hbbs_sync_async() {
                 if let Some(ack) = QC_ACK.lock().unwrap().take() {
                     v["qc_ack"] = ack;
                 }
+                // Qianchen Desk: LAN addresses, shown to controllers on the same network.
+                #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+                {
+                    v["qc_lan"] = json!(crate::lan::local_lan_ipv4s().join(","));
+                }
                 let response = crate::post_request(url.clone(), v.to_string(), "").await;
                 if let Err(err) = &response {
                     hbb_common::throttled_log!(API_LOG_INTERVAL, warn, "Heartbeat failed: {err:?}");
