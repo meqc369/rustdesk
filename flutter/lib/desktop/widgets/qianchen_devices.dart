@@ -132,6 +132,10 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
 
   bool _isOnline(Peer p) => _online[p.id] ?? p.online;
 
+  bool _isSelf(Peer p) =>
+      p.id.isNotEmpty &&
+      p.id == trimID(gFFI.serverModel.serverId.text);
+
   Future<void> _fetchIps() async {
     try {
       final mine = <String>[];
@@ -555,12 +559,20 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(_name(p),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: selected ? FontWeight.w600 : FontWeight.w500)),
+                Row(children: [
+                  Flexible(
+                    child: Text(_name(p),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight:
+                                selected ? FontWeight.w600 : FontWeight.w500)),
+                  ),
+                  if (_isSelf(p))
+                    _chip(translate('qc-this-device'), const Color(0xFFC77A12))
+                        .paddingOnly(left: 6),
+                ]),
                 const SizedBox(height: 2),
                 Row(children: [
                   Text(formatID(p.id),
@@ -724,6 +736,9 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
                     ),
                   ]),
                   Wrap(spacing: 6, runSpacing: 4, children: [
+                    if (_isSelf(p))
+                      _chip(translate('qc-this-device'), const Color(0xFFC77A12),
+                          icon: Icons.person_pin_circle_rounded),
                     _chip(online ? translate('Online') : translate('Offline'),
                         online ? const Color(0xFF1E9E63) : Colors.grey),
                     if (isLan)

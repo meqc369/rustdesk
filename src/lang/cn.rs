@@ -12,7 +12,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Start service", "启动服务"),
         ("Service is running", "服务正在运行"),
         ("Service is not running", "服务未运行"),
-        ("not_ready_status", "未就绪，请检查网络连接"),
+        ("not_ready_status", "未就绪：连不上服务器。开着 VPN 的话，请把 www.pienv.com 设为直连"),
         ("Control Remote Desktop", "控制远程桌面"),
         ("Transfer file", "传输文件"),
         ("Connect", "连接"),
