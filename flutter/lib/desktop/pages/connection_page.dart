@@ -35,6 +35,7 @@ class OnlineStatusWidget extends StatefulWidget {
 class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
   final _svcStopped = Get.find<RxBool>(tag: 'stop-service');
   final _svcIsUsingPublicServer = true.obs;
+  DateTime? _qcConnectingSince;
   Timer? _updateTimer;
 
   double get em => 14.0;
@@ -175,7 +176,15 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
     final status =
         jsonDecode(await bind.mainGetConnectStatus()) as Map<String, dynamic>;
     final statusNum = status['status_num'] as int;
-    if (statusNum == 0) {
+    // Qianchen Desk: "connecting" that never ends (UDP/TCP to the ID server blocked,
+    // e.g. by a VPN) is reported as not ready, which also shows the fallback hint.
+    if (statusNum != 0) {
+      _qcConnectingSince = null;
+    } else {
+      _qcConnectingSince ??= DateTime.now();
+    }
+    if (statusNum == 0 &&
+        DateTime.now().difference(_qcConnectingSince!).inSeconds < 20) {
       stateGlobal.svcStatus.value = SvcStatus.connecting;
     } else if (statusNum == -1) {
       stateGlobal.svcStatus.value = SvcStatus.notReady;
