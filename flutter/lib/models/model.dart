@@ -122,6 +122,8 @@ class FfiModel with ChangeNotifier {
   Timer? _restartReconnectDelayTimer;
   var _reconnects = 1;
   DateTime? _offlineReconnectStartTime;
+  // Qianchen Desk: when a connected session dropped; retries stay quiet until a deadline.
+  DateTime? _qcLostAt;
   bool _androidDocumentPickerActive = false;
   bool _androidDocumentPickerInterruptedConnection = false;
   bool _viewOnly = false;
@@ -1065,6 +1067,32 @@ class FfiModel with ChangeNotifier {
   showMsgBox(SessionID sessionId, String type, String title, String text,
       String link, bool hasRetry, OverlayDialogManager dialogManager,
       {bool? hasCancel}) async {
+    // Qianchen Desk: a session that was working and dropped (remote shut down, network
+    // blip) reconnects quietly behind the Connecting overlay for ~15 s instead of
+    // alternating error boxes, then shows a single box with a manual Reconnect.
+    if (hasRetry && title == 'Connection Error' && _pi.isSet.isTrue) {
+      _qcLostAt ??= DateTime.now();
+      if (DateTime.now().difference(_qcLostAt!).inSeconds < 15) {
+        if (_reconnects == 1) {
+          dialogManager.dismissAll();
+          dialogManager.showLoading(translate('Connecting...'),
+              onCancel: closeConnection);
+        }
+        _timer?.cancel();
+        _timer = Timer(Duration(seconds: _reconnects), () {
+          reconnect(dialogManager, sessionId, false);
+        });
+        _reconnects *= 2;
+        return;
+      }
+      _qcLostAt = null;
+      _reconnects = 1;
+      _offlineReconnectStartTime = null;
+      _timer?.cancel();
+      msgBox(sessionId, type, title, text, link, dialogManager,
+          hasCancel: hasCancel, reconnect: reconnect, reconnectTimeout: 0);
+      return;
+    }
     final noteAllowed = parent.target != null &&
         allowAskForNoteAtEndOfConnection(parent.target, false) &&
         (title == "Connection Error" || type == "restarting");
@@ -1454,6 +1482,7 @@ class FfiModel with ChangeNotifier {
       if (displays.isNotEmpty) {
         _reconnects = 1;
         _offlineReconnectStartTime = null;
+        _qcLostAt = null;
         resetRestartReconnectState();
         waitForFirstImage.value = true;
         isRefreshing = false;

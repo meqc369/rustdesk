@@ -3634,7 +3634,9 @@ class _CountDownButtonState extends State<_CountDownButton> {
   @override
   Widget build(BuildContext context) {
     return dialogButton(
-      '${translate(widget.text)} (${_countdownSeconds}s)',
+      widget.second > 0 // Qianchen Desk: 0 = plain button, no countdown
+          ? '${translate(widget.text)} (${_countdownSeconds}s)'
+          : translate(widget.text),
       onPressed: widget.onPressed,
       isOutline: true,
     );
