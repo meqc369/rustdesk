@@ -43,6 +43,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("qc-device-offline", "The device is offline"),
         ("qc-cmd-timeout", "The device did not respond, please try again"),
         ("qc-ready-fallback", "Usable through the fallback channel (VPN detected)"),
+        ("qc-drop-upload", "Drop to upload to the remote folder"),
+        ("qc-drop-download", "Drop to download to the local folder"),
         ("qc-device-id", "ID"),
         ("connecting_status", "Connecting to the RustDesk network..."),
         ("not_ready_status", "Not ready. Please check your connection"),

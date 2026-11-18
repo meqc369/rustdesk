@@ -187,16 +187,62 @@ class _FileManagerPageState extends State<FileManagerPage>
   }
 
   Widget dropArea(FileManagerView fileView) {
-    return DropTarget(
-        onDragDone: (detail) =>
-            handleDragDone(detail, fileView.controller.isLocal),
-        onDragEntered: (enter) {
-          _dropMaskVisible.value = true;
-        },
-        onDragExited: (exit) {
-          _dropMaskVisible.value = false;
-        },
-        child: fileView);
+    final isLocal = fileView.controller.isLocal;
+    final hover = false.obs;
+    Widget mask(String text) => IgnorePointer(
+          child: Container(
+            margin: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: MyTheme.accent.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: MyTheme.accent, width: 2),
+            ),
+            child: Center(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                decoration: BoxDecoration(
+                    color: MyTheme.accent,
+                    borderRadius: BorderRadius.circular(10)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.file_download_outlined,
+                      color: Colors.white, size: 18),
+                  const SizedBox(width: 8),
+                  Text(translate(text),
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ),
+          ),
+        );
+    return DragTarget<_QcDragRows>(
+      onWillAcceptWithDetails: (d) => d.data.isLocal != isLocal,
+      onAcceptWithDetails: (d) {
+        hover.value = false;
+        _qcDropRows(d.data);
+      },
+      onMove: (_) => hover.value = true,
+      onLeave: (_) => hover.value = false,
+      builder: (context, candidate, rejected) => DropTarget(
+          onDragDone: (detail) => handleDragDone(detail, isLocal),
+          onDragEntered: (enter) {
+            if (!isLocal) _dropMaskVisible.value = true;
+          },
+          onDragExited: (exit) {
+            _dropMaskVisible.value = false;
+          },
+          child: Stack(children: [
+            fileView,
+            Obx(() => (candidate.isNotEmpty && hover.value) ||
+                    (!isLocal && _dropMaskVisible.value)
+                ? Positioned.fill(
+                    child: mask(isLocal
+                        ? 'qc-drop-download'
+                        : 'qc-drop-upload'))
+                : const SizedBox.shrink()),
+          ])),
+    );
   }
 
   Widget generateCard(Widget child) {
@@ -403,11 +449,14 @@ class _FileManagerPageState extends State<FileManagerPage>
   }
 
   void handleDragDone(DropDoneDetails details, bool isLocal) {
+    _dropMaskVisible.value = false;
     if (isLocal) {
       // ignore local
       return;
     }
-    final items = SelectedItems(isLocal: false);
+    // Qianchen Desk: these are local files (from Finder / Explorer); send them to the
+    // remote pane's current folder. Upstream built remote items here, which downloads.
+    final items = SelectedItems(isLocal: true);
     for (var file in details.files) {
       final f = File(file.path);
       items.add(Entry()
@@ -415,8 +464,18 @@ class _FileManagerPageState extends State<FileManagerPage>
         ..name = file.name
         ..size = FileSystemEntity.isDirectorySync(f.path) ? 0 : f.lengthSync());
     }
-    final otherSideData = model.localController.directoryData();
-    model.remoteController.sendFiles(items, otherSideData);
+    model.localController.sendFiles(items, model.remoteController.directoryData());
+  }
+
+  /// Qianchen Desk: rows dragged from one pane and dropped on the other are transferred.
+  void _qcDropRows(_QcDragRows rows) {
+    if (rows.isLocal) {
+      model.localController
+          .sendFiles(rows.items, model.remoteController.directoryData());
+    } else {
+      model.remoteController
+          .sendFiles(rows.items, model.localController.directoryData());
+    }
   }
 }
 
@@ -1190,7 +1249,7 @@ class _FileManagerViewState extends State<FileManagerView> {
                 details.globalPosition.dy);
           }
 
-          return Padding(
+          return _qcDraggableRow(entry, Padding(
             padding: EdgeInsets.symmetric(vertical: 1),
             child: Obx(() => Container(
                 decoration: BoxDecoration(
@@ -1317,7 +1376,7 @@ class _FileManagerViewState extends State<FileManagerView> {
                     ),
                   ],
                 ))),
-          );
+          ));
         });
 
         return Column(
@@ -1342,6 +1401,52 @@ class _FileManagerViewState extends State<FileManagerView> {
           ],
         );
       }),
+    );
+  }
+
+  Widget _qcDraggableRow(Entry entry, Widget row) {
+    if (entry.isDrive) return row;
+    // Filled when the drag starts, so it reflects the selection at that moment.
+    final rows = _QcDragRows(SelectedItems(isLocal: isLocal));
+    return Draggable<_QcDragRows>(
+      dragAnchorStrategy: pointerDragAnchorStrategy,
+      data: rows,
+      onDragStarted: () {
+        rows.items.clear();
+        if (selectedItems.items.contains(entry)) {
+          for (final e in selectedItems.items) {
+            rows.items.add(e);
+          }
+        } else {
+          rows.items.add(entry);
+        }
+      },
+      feedback: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: MyTheme.accent,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: const [
+              BoxShadow(color: Colors.black26, blurRadius: 8)
+            ],
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(entry.isFile ? Icons.insert_drive_file_outlined : Icons.folder,
+                color: Colors.white, size: 16),
+            const SizedBox(width: 6),
+            Text(
+                selectedItems.items.contains(entry) &&
+                        selectedItems.items.length > 1
+                    ? '${entry.name} +${selectedItems.items.length - 1}'
+                    : entry.name,
+                style: const TextStyle(color: Colors.white, fontSize: 13)),
+          ]),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: 0.5, child: row),
+      child: row,
     );
   }
 
@@ -1859,4 +1964,11 @@ Widget buildWindowsThisPC(BuildContext context, [TextStyle? textStyle]) {
     SizedBox(width: 10),
     Text(translate('This PC'), style: textStyle)
   ]);
+}
+
+/// Qianchen Desk: rows dragged between the two panes.
+class _QcDragRows {
+  final SelectedItems items;
+  _QcDragRows(this.items);
+  bool get isLocal => items.isLocal;
 }

@@ -2523,6 +2523,12 @@ fn apply_qianchen_defaults() {
         defaults.entry(k.to_owned()).or_insert_with(|| v.to_owned());
     }
     drop(defaults);
+    // Full chroma (4:4:4): 4:2:0 smears coloured fringes around text and thin lines.
+    config::DEFAULT_DISPLAY_SETTINGS
+        .write()
+        .unwrap()
+        .entry("i444".to_owned())
+        .or_insert_with(|| "Y".to_owned());
     // Official updates would replace this build and drop the settings above.
     config::OVERWRITE_SETTINGS
         .write()
