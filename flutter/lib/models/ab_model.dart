@@ -1412,13 +1412,17 @@ class Ab extends BaseAb {
   Future<bool> pullAbImpl({quiet = false}) async {
     bool ret = true;
     List<Peer> tmpPeers = [];
-    if (!await _fetchPeers(tmpPeers, quiet: quiet)) {
+    // Qianchen Desk: a failed pull (e.g. a timeout over a VPN) keeps what we had;
+    // replacing it with an empty list showed every device under its computer name
+    // until the next pull.
+    if (await _fetchPeers(tmpPeers, quiet: quiet)) {
+      peers.value = tmpPeers;
+    } else {
       ret = false;
     }
-    peers.value = tmpPeers;
     List<AbTag> tmpTags = [];
     if (!await _fetchTags(tmpTags, quiet: quiet)) {
-      ret = false;
+      return false;
     }
     tags.value = tmpTags.map((e) => e.name).toList();
     Map<String, int> tmpTagColors = {};
