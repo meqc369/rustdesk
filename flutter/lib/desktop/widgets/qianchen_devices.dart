@@ -25,9 +25,9 @@ import '../../utils/http_service.dart' as http;
 final qcHeartbeatOnline = false.obs;
 
 String _qcRate(double b) {
-  if (b < 1024) return '${b.toStringAsFixed(0)} B/s';
-  if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(b < 10240 ? 1 : 0)} KB/s';
-  return '${(b / 1024 / 1024).toStringAsFixed(1)} MB/s';
+  if (b < 1024) return '${b.toStringAsFixed(0)}B/s';
+  if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(b < 10240 ? 1 : 0)}K/s';
+  return '${(b / 1024 / 1024).toStringAsFixed(1)}M/s';
 }
 
 String _qcGb(double b) => (b / 1024 / 1024 / 1024).toStringAsFixed(1);
@@ -80,7 +80,7 @@ Widget qcStatsRows(BuildContext context, Map stats, {bool hideMissing = false}) 
       row(Icons.storage_rounded, translate('qc-stat-mem'),
           '${mem.toStringAsFixed(0)}% · ${_qcGb(n('mem'))}/${_qcGb(memTotal)} GB', mem),
     row(Icons.swap_vert_rounded, translate('qc-stat-net'),
-        '↓ ${_qcRate(n('rx'))}   ↑ ${_qcRate(n('tx'))}'),
+        '↓${_qcRate(n('rx'))}  ↑${_qcRate(n('tx'))}'),
     if (temp != null || !hideMissing)
       row(Icons.thermostat_rounded, translate('qc-stat-temp'),
           temp == null ? translate('qc-stat-na') : '${temp.toStringAsFixed(0)}°C'),
