@@ -216,13 +216,6 @@ class MainFlutterWindow: NSWindow {
                 case "terminate":
                     NSApplication.shared.terminate(self)
                     result(nil)
-                case "setPasteboardFiles":
-                    // Qianchen Desk: files dropped on the remote view go to the remote through the file clipboard.
-                    let arg = call.arguments as? [String: Any]
-                    let paths = arg?["paths"] as? [String] ?? []
-                    let urls = paths.map { NSURL(fileURLWithPath: $0) }
-                    NSPasteboard.general.clearContents()
-                    result(!urls.isEmpty && NSPasteboard.general.writeObjects(urls))
                 case "canRecordAudio":
                     switch AVCaptureDevice.authorizationStatus(for: .audio) {
                     case .authorized:

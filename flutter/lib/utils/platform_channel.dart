@@ -16,13 +16,6 @@ class RdPlatformChannel {
   final MethodChannel _hostMethodChannel =
       MethodChannel("org.rustdesk.rustdesk/host");
 
-  /// Qianchen Desk: put files on the macOS pasteboard.
-  Future<bool> setPasteboardFiles(List<String> paths) async {
-    final bool? ok = await _hostMethodChannel
-        .invokeMethod("setPasteboardFiles", {"paths": paths});
-    return ok ?? false;
-  }
-
   /// Bump the position of the mouse cursor, if applicable
   Future<bool> bumpMouse({required int dx, required int dy}) async {
     // No debug output; this call is too chatty.

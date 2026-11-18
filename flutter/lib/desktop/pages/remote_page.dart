@@ -1,8 +1,5 @@
 import 'dart:async';
 
-import 'dart:io';
-
-import 'package:desktop_drop/desktop_drop.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -23,7 +20,6 @@ import '../../models/platform_model.dart';
 import '../../models/shortcut_model.dart';
 import '../../common/shared_state.dart';
 import '../../utils/image.dart';
-import '../../utils/platform_channel.dart';
 import '../widgets/remote_toolbar.dart';
 import '../widgets/kb_layout_type_chooser.dart';
 import '../widgets/tabbar_widget.dart';
@@ -1016,85 +1012,9 @@ class _RemotePageState extends State<RemotePage>
             QualityMonitor(_ffi.qualityMonitorModel), null, null),
       ),
     );
-    return DropTarget(
-      onDragEntered: (_) => _qcDropping.value = true,
-      onDragExited: (_) => _qcDropping.value = false,
-      onDragDone: _qcDropFiles,
-      child: Stack(children: [
-        ...paints,
-        Obx(() => _qcDropping.isTrue
-            ? Positioned.fill(
-                child: IgnorePointer(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: MyTheme.accent.withOpacity(0.08),
-                      border: Border.all(color: MyTheme.accent, width: 3),
-                    ),
-                    alignment: Alignment.topCenter,
-                    padding: const EdgeInsets.only(top: 24),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                          color: MyTheme.accent,
-                          borderRadius: BorderRadius.circular(10)),
-                      child: Text(translate('qc-drop-remote'),
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                  ),
-                ),
-              )
-            : const SizedBox.shrink()),
-      ]),
+    return Stack(
+      children: paints,
     );
-  }
-
-  final _qcDropping = false.obs;
-
-  /// Qianchen Desk: files dropped from Finder / Explorer land in the remote folder under
-  /// the pointer. They go through the file clipboard: put them on our clipboard, click
-  /// where they were dropped to focus that folder window, then paste there.
-  Future<void> _qcDropFiles(DropDoneDetails d) async {
-    _qcDropping.value = false;
-    final paths = d.files.map((f) => f.path).where((p) => p.isNotEmpty).toList();
-    if (paths.isEmpty) return;
-    final input = _ffi.inputModel;
-    final pos = input.handlePointerDevicePos(kPointerEventKindMouse,
-        d.globalPosition.dx, d.globalPosition.dy, false, kMouseEventTypeDefault);
-    bool ok;
-    if (isMacOS) {
-      ok = await RdPlatformChannel.instance.setPasteboardFiles(paths);
-    } else if (isWindows) {
-      final list = paths.map((p) => "'${p.replaceAll("'", "''")}'").join(',');
-      final r = await Process.run('powershell',
-          ['-NoProfile', '-Command', 'Set-Clipboard -LiteralPath $list']);
-      ok = r.exitCode == 0;
-    } else {
-      ok = false;
-    }
-    if (!ok) {
-      showToast(translate('qc-drop-failed'));
-      return;
-    }
-    showToast('${translate('qc-drop-sending')} (${paths.length})');
-    if (pos != null) {
-      await input.moveMouse(pos.x.toDouble(), pos.y.toDouble());
-      await input.tap(MouseButtons.left);
-    }
-    // Leave time for the file list to reach the remote clipboard.
-    await Future.delayed(const Duration(milliseconds: 1200));
-    final mac = _ffi.ffiModel.pi.platform == kPeerPlatformMacOS;
-    await bind.sessionInputKey(
-        sessionId: sessionId,
-        name: 'VK_V',
-        down: false,
-        press: true,
-        alt: false,
-        ctrl: !mac,
-        shift: false,
-        command: mac);
   }
 
   @override
