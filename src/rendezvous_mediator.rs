@@ -236,6 +236,9 @@ impl IceRoute {
 }
 
 static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
+/// Qianchen Desk: the running server, so a relay request that arrives over the HTTPS
+/// heartbeat (when UDP to the rendezvous server is blocked, e.g. by a VPN) can be served.
+pub static QC_SERVER: std::sync::Mutex<Option<ServerPtr>> = std::sync::Mutex::new(None);
 static MANUAL_RESTARTED: AtomicBool = AtomicBool::new(false);
 static MANUAL_RESTART_NOTIFY: Notify = Notify::const_new();
 static SENT_REGISTER_PK: AtomicBool = AtomicBool::new(false);
@@ -323,6 +326,7 @@ impl RendezvousMediator {
         }
         check_zombie();
         let server = new_server();
+        *QC_SERVER.lock().unwrap() = Some(server.clone());
         if config::option2bool("stop-service", &Config::get_option("stop-service")) {
             crate::test_rendezvous_server();
         }

@@ -393,6 +393,13 @@ impl Client {
         match Self::_start(peer, key, token, conn_type, interface.clone()).await {
             Err(err) => {
                 let err_str = err.to_string();
+                if interface.get_lch().read().unwrap().other_server.is_none() {
+                    if let Some((conn, pk)) = Self::qc_try_relay(peer, key, conn_type).await {
+                        log::info!("Qianchen Desk: connected to {} via heartbeat relay ({})", peer, err_str);
+                        interface.update_direct(Some(false));
+                        return Ok(((conn, false, pk, None, "Relay"), (0, String::new())));
+                    }
+                }
                 if err_str.starts_with("Failed") {
                     bail!(err_str + ": Please try later");
                 } else {
@@ -1668,12 +1675,31 @@ impl Client {
     /// The peer must prove the identity seen on an earlier rendezvous connection.
     async fn qc_try_lan(peer: &str, key: &str) -> Option<(Stream, Option<Vec<u8>>)> {
         let cfg = PeerConfig::load(peer);
-        let signed_id_pk = crate::decode64(cfg.options.get("qc-signed-pk")?).ok()?;
-        let tries: Vec<_> = cfg
-            .options
-            .get("qc-lan-ips")?
-            .split(',')
-            .filter(|x| !x.is_empty())
+        // The server knows the device's current LAN addresses and can vouch for its identity,
+        // so devices never reached through the rendezvous server can still be used on the LAN.
+        let info = Self::qc_api("peer-info", peer).await;
+        let server_spk = info
+            .as_ref()
+            .and_then(|v| v["spk"].as_str())
+            .and_then(|s| crate::decode64(s).ok())
+            .filter(|s| !s.is_empty());
+        let signed_id_pk = match server_spk {
+            Some(s) => s,
+            None => crate::decode64(cfg.options.get("qc-signed-pk")?).ok()?,
+        };
+        let mut ips: Vec<String> = Vec::new();
+        for list in [
+            info.as_ref().and_then(|v| v["lan"].as_str()).unwrap_or_default(),
+            cfg.options.get("qc-lan-ips").map(|x| x.as_str()).unwrap_or_default(),
+        ] {
+            for ip in list.split(',') {
+                if !ip.is_empty() && !ips.iter().any(|x| x == ip) {
+                    ips.push(ip.to_owned());
+                }
+            }
+        }
+        let tries: Vec<_> = ips
+            .into_iter()
             .map(|ip| {
                 let addr = format!("{}:{}", ip, RELAY_PORT + 1);
                 async move { connect_tcp_local(addr, None, 800).await }.boxed()
@@ -1695,6 +1721,68 @@ impl Client {
             Ok(Ok(pk)) if conn.is_secured() => Some((conn, pk)),
             _ => {
                 log::info!("Qianchen Desk: LAN address of {} did not verify", peer);
+                None
+            }
+        }
+    }
+
+    /// Qianchen Desk: call our server's helper with the signed-in account.
+    async fn qc_api(path: &str, peer: &str) -> Option<serde_json::Value> {
+        let token = LocalConfig::get_option("access_token");
+        if token.is_empty() {
+            return None;
+        }
+        let api = crate::common::get_api_server(
+            Config::get_option("api-server"),
+            Config::get_option("custom-rendezvous-server"),
+        );
+        if api.is_empty() {
+            return None;
+        }
+        let url = format!("{}/qc-api/{}", api.trim_end_matches('/'), path);
+        let body = serde_json::json!({ "peer_id": peer }).to_string();
+        let header = format!("Authorization: Bearer {token}");
+        let text = timeout(4000, crate::post_request(url, body, &header))
+            .await
+            .ok()?
+            .ok()?;
+        let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+        if v["code"].as_i64() != Some(0) {
+            log::info!("Qianchen Desk: {} for {}: {}", path, peer, v["message"]);
+            return None;
+        }
+        Some(v["data"].clone())
+    }
+
+    /// Qianchen Desk: when the device is unreachable through the rendezvous server (its UDP is
+    /// blocked by a VPN), ask it over the HTTPS heartbeat to meet us on the TCP relay.
+    async fn qc_try_relay(
+        peer: &str,
+        key: &str,
+        conn_type: ConnType,
+    ) -> Option<(Stream, Option<Vec<u8>>)> {
+        let info = Self::qc_api("peer-relay", peer).await?;
+        let uuid = info["uuid"].as_str()?.to_owned();
+        let relay = info["relay"].as_str()?.to_owned();
+        let signed_id_pk = crate::decode64(info["spk"].as_str()?).ok()?;
+        log::info!("Qianchen Desk: relaying {} through the heartbeat, uuid {}", peer, uuid);
+        let mut conn = timeout(
+            CONNECT_TIMEOUT,
+            Self::create_relay(peer, uuid, relay, key, conn_type, true),
+        )
+        .await
+        .ok()?
+        .ok()?;
+        // The device picks the request up with its next heartbeat (every 3 s while offline).
+        match timeout(
+            25_000,
+            Self::secure_connection(peer, signed_id_pk, key, &mut conn),
+        )
+        .await
+        {
+            Ok(Ok(pk)) if conn.is_secured() => Some((conn, pk)),
+            other => {
+                log::info!("Qianchen Desk: heartbeat relay to {} failed: {:?}", peer, other.map(|r| r.map(|_| ())));
                 None
             }
         }

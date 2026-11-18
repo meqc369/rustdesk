@@ -231,7 +231,10 @@ async fn start_hbbs_sync_async() {
                         }
                     }
                 }
-                if conns.is_empty() && QC_ACK.lock().unwrap().is_none() && last_sent.map(|x| x.elapsed() < TIME_HEARTBEAT).unwrap_or(false) {
+                // Qianchen Desk: while the rendezvous server is unreachable over UDP, the heartbeat
+                // is how relay requests reach us, so send it every tick (3 s).
+                let registered = config::get_online_state() > 0;
+                if registered && conns.is_empty() && QC_ACK.lock().unwrap().is_none() && last_sent.map(|x| x.elapsed() < TIME_HEARTBEAT).unwrap_or(false) {
                     continue;
                 }
                 last_sent = Some(Instant::now());
@@ -251,6 +254,7 @@ async fn start_hbbs_sync_async() {
                 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
                 {
                     v["qc_lan"] = json!(crate::lan::local_lan_ipv4s().join(","));
+                    v["qc_pk"] = json!(crate::encode64(Config::get_key_pair().1));
                 }
                 let response = crate::post_request(url.clone(), v.to_string(), "").await;
                 if let Err(err) = &response {
@@ -363,6 +367,27 @@ async fn handle_qc_cmd(id: &str, signed: &str) {
                 }
             });
             (true, String::new())
+        }
+        "relay" => {
+            let uuid = cmd["uuid"].as_str().unwrap_or_default().to_owned();
+            let relay = cmd["relay"].as_str().unwrap_or_default().to_owned();
+            let server = crate::rendezvous_mediator::QC_SERVER.lock().unwrap().clone();
+            match server {
+                Some(server) if !uuid.is_empty() && !relay.is_empty() => {
+                    log::info!("Qianchen Desk: relay requested over heartbeat, uuid {uuid}");
+                    tokio::spawn(crate::server::create_relay_connection(
+                        server,
+                        relay,
+                        uuid,
+                        "0.0.0.0:0".parse().unwrap(),
+                        true,
+                        true,
+                        Default::default(),
+                    ));
+                    (true, String::new())
+                }
+                _ => (false, "relay unavailable".to_owned()),
+            }
         }
         "lock" => {
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
