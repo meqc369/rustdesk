@@ -370,6 +370,8 @@ class FileController {
 
   final DirectoryData Function() getOtherSideDirectoryData;
   late final SelectedItems selectedItems = SelectedItems(isLocal: isLocal);
+  // Qianchen Desk: folder row a drag is hovering, so a drop lands inside it.
+  final qcDropDir = Rxn<Entry>();
 
   FileController(
       {required this.isLocal,

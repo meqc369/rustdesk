@@ -197,7 +197,10 @@ class _FileManagerPageState extends State<FileManagerPage>
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: MyTheme.accent, width: 2),
             ),
+            alignment: Alignment.bottomCenter,
+            padding: const EdgeInsets.only(bottom: 18),
             child: Center(
+              heightFactor: 1,
               child: Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
@@ -208,7 +211,7 @@ class _FileManagerPageState extends State<FileManagerPage>
                   const Icon(Icons.file_download_outlined,
                       color: Colors.white, size: 18),
                   const SizedBox(width: 8),
-                  Text(translate(text),
+                  Text(text,
                       style: const TextStyle(
                           color: Colors.white, fontWeight: FontWeight.w600)),
                 ]),
@@ -237,9 +240,11 @@ class _FileManagerPageState extends State<FileManagerPage>
             Obx(() => (candidate.isNotEmpty && hover.value) ||
                     (!isLocal && _dropMaskVisible.value)
                 ? Positioned.fill(
-                    child: mask(isLocal
-                        ? 'qc-drop-download'
-                        : 'qc-drop-upload'))
+                    child: mask(fileView.controller.qcDropDir.value != null
+                        ? '${translate('qc-drop-into')}${fileView.controller.qcDropDir.value!.name}'
+                        : translate(isLocal
+                            ? 'qc-drop-download'
+                            : 'qc-drop-upload')))
                 : const SizedBox.shrink()),
           ])),
     );
@@ -464,7 +469,13 @@ class _FileManagerPageState extends State<FileManagerPage>
         ..name = file.name
         ..size = FileSystemEntity.isDirectorySync(f.path) ? 0 : f.lengthSync());
     }
-    model.localController.sendFiles(items, model.remoteController.directoryData());
+    final dir = model.remoteController.qcDropDir.value;
+    model.remoteController.qcDropDir.value = null;
+    model.localController.sendFiles(
+        items,
+        dir == null
+            ? model.remoteController.directoryData()
+            : qcFolderData(model.remoteController, dir));
   }
 
   /// Qianchen Desk: rows dragged from one pane and dropped on the other are transferred.
@@ -1249,7 +1260,7 @@ class _FileManagerViewState extends State<FileManagerView> {
                 details.globalPosition.dy);
           }
 
-          return _qcDraggableRow(entry, Padding(
+          return _qcDraggableRow(entry, _qcFolderDropRow(entry, Padding(
             padding: EdgeInsets.symmetric(vertical: 1),
             child: Obx(() => Container(
                 decoration: BoxDecoration(
@@ -1376,7 +1387,7 @@ class _FileManagerViewState extends State<FileManagerView> {
                     ),
                   ],
                 ))),
-          ));
+          )));
         });
 
         return Column(
@@ -1448,6 +1459,46 @@ class _FileManagerViewState extends State<FileManagerView> {
       childWhenDragging: Opacity(opacity: 0.5, child: row),
       child: row,
     );
+  }
+
+  /// Qianchen Desk: a folder row takes drops from the other pane (and, in the remote
+  /// pane, from Finder / Explorer); the files go inside that folder.
+  Widget _qcFolderDropRow(Entry entry, Widget row) {
+    if (!entry.isDirectory) return row;
+    final drop = controller.qcDropDir;
+    void enter(_) => drop.value = entry;
+    // Cleared a tick later: the pane reads it on the same drop event.
+    void exit(_) => Future.microtask(() {
+          if (drop.value == entry) drop.value = null;
+        });
+    Widget target = DragTarget<_QcDragRows>(
+      onWillAcceptWithDetails: (d) => d.data.isLocal != isLocal,
+      onMove: enter,
+      onLeave: exit,
+      onAcceptWithDetails: (d) {
+        drop.value = null;
+        final fm = _ffi.fileModel;
+        (d.data.isLocal ? fm.localController : fm.remoteController)
+            .sendFiles(d.data.items, qcFolderData(controller, entry));
+      },
+      builder: (context, candidate, rejected) => Obx(() => Container(
+            foregroundDecoration: drop.value == entry
+                ? BoxDecoration(
+                    color: MyTheme.accent.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: MyTheme.accent, width: 2))
+                : null,
+            child: row,
+          )),
+    );
+    if (!isLocal) {
+      target = DropTarget(
+          onDragEntered: enter,
+          onDragUpdated: enter,
+          onDragExited: exit,
+          child: target);
+    }
+    return target;
   }
 
   onSearchText(String searchText, bool isLocal) {
@@ -1965,6 +2016,10 @@ Widget buildWindowsThisPC(BuildContext context, [TextStyle? textStyle]) {
     Text(translate('This PC'), style: textStyle)
   ]);
 }
+
+/// Qianchen Desk: destination [dir] (a folder row) with [side]'s options.
+DirectoryData qcFolderData(FileController side, Entry dir) =>
+    DirectoryData(FileDirectory()..path = dir.path, side.options.value);
 
 /// Qianchen Desk: rows dragged between the two panes.
 class _QcDragRows {
