@@ -27,7 +27,7 @@ pub mod win_topmost_window;
 pub mod macos;
 
 #[cfg(windows)]
-mod win_virtual_display;
+pub mod win_virtual_display;
 #[cfg(windows)]
 pub use win_virtual_display::restore_reg_connectivity;
 

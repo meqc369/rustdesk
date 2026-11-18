@@ -4832,6 +4832,18 @@ impl Connection {
                         e
                     )))
                     .await;
+                } else {
+                    // Qianchen Desk: the new display becomes the main one once Windows has
+                    // attached it to the desktop.
+                    std::thread::spawn(|| {
+                        for _ in 0..5 {
+                            std::thread::sleep(std::time::Duration::from_millis(1500));
+                            match crate::privacy_mode::win_virtual_display::qc_make_virtual_primary() {
+                                Ok(()) => return,
+                                Err(e) => log::warn!("Make the virtual display primary: {}", e),
+                            }
+                        }
+                    });
                 }
             }
         } else {

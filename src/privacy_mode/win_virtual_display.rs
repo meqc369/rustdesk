@@ -554,6 +554,26 @@ impl PrivacyMode for PrivacyModeImpl {
     }
 }
 
+/// Qianchen Desk: make the virtual display the main display. Otherwise its desktop is bare
+/// (no icons, Start opens on the physical screen) and new windows open on a screen the
+/// controller is not looking at. Physical displays stay on as extended displays; when the
+/// virtual display is unplugged (at the latest when the last session ends) Windows makes a
+/// physical display primary again.
+pub fn qc_make_virtual_primary() -> ResultType<()> {
+    let mut pm = PrivacyModeImpl::new(PRIVACY_MODE_IMPL);
+    pm.set_displays();
+    if pm.virtual_displays.is_empty() {
+        bail!("No virtual displays.");
+    }
+    if pm.virtual_displays.iter().any(|d| d.primary) {
+        return Ok(());
+    }
+    let name = pm.set_primary_display()?;
+    PrivacyModeImpl::commit_change_display(0)?;
+    log::info!("Virtual display {} is now the primary display", name);
+    Ok(())
+}
+
 impl Drop for PrivacyModeImpl {
     fn drop(&mut self) {
         if self.conn_id != INVALID_PRIVACY_MODE_CONN_ID {
