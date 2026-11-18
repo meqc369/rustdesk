@@ -2872,6 +2872,10 @@ pub fn main_get_printer_names() -> SyncReturn<String> {
 }
 
 pub fn main_get_common(key: String) -> String {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if key == "qc-sys-stats" {
+        return crate::qianchen_stats::snapshot().to_string();
+    }
     if key == "is-printer-installed" {
         #[cfg(target_os = "windows")]
         {

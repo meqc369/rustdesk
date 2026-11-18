@@ -24,6 +24,124 @@ import '../../utils/http_service.dart' as http;
 /// "not ready".
 final qcHeartbeatOnline = false.obs;
 
+String _qcRate(double b) {
+  if (b < 1024) return '${b.toStringAsFixed(0)} B/s';
+  if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(b < 10240 ? 1 : 0)} KB/s';
+  return '${(b / 1024 / 1024).toStringAsFixed(1)} MB/s';
+}
+
+String _qcGb(double b) => (b / 1024 / 1024 / 1024).toStringAsFixed(1);
+
+/// Qianchen Desk: CPU / memory / network / temperature rows for a stats map from
+/// qianchen_stats.rs (the heartbeat of another computer, or this one directly).
+Widget qcStatsRows(BuildContext context, Map stats, {bool hideMissing = false}) {
+  final muted = Theme.of(context).textTheme.bodySmall?.color;
+  double n(String k) => (stats[k] as num?)?.toDouble() ?? 0;
+  final cpu = n('cpu').clamp(0, 100).toDouble();
+  final memTotal = n('mem_total');
+  final mem = memTotal > 0 ? (n('mem') / memTotal * 100).clamp(0, 100).toDouble() : 0.0;
+  final temp = stats['temp'] as num?;
+  Widget row(IconData icon, String label, String value, [double? pct]) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 5),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            Icon(icon, size: 15, color: muted),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 12, color: muted)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(value,
+                  textAlign: TextAlign.right,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+            ),
+          ]),
+          if (pct != null) ...[
+            const SizedBox(height: 5),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: LinearProgressIndicator(
+                value: pct / 100,
+                minHeight: 4,
+                backgroundColor: MyTheme.accent.withOpacity(0.10),
+                color: pct >= 90
+                    ? const Color(0xFFD9534F)
+                    : pct >= 70
+                        ? const Color(0xFFE0A030)
+                        : MyTheme.accent,
+              ),
+            ),
+          ],
+        ]),
+      );
+  return Column(children: [
+    row(Icons.memory_rounded, 'CPU', '${cpu.toStringAsFixed(0)}%', cpu),
+    if (memTotal > 0)
+      row(Icons.storage_rounded, translate('qc-stat-mem'),
+          '${mem.toStringAsFixed(0)}% · ${_qcGb(n('mem'))}/${_qcGb(memTotal)} GB', mem),
+    row(Icons.swap_vert_rounded, translate('qc-stat-net'),
+        '↓ ${_qcRate(n('rx'))}   ↑ ${_qcRate(n('tx'))}'),
+    if (temp != null || !hideMissing)
+      row(Icons.thermostat_rounded, translate('qc-stat-temp'),
+          temp == null ? translate('qc-stat-na') : '${temp.toStringAsFixed(0)}°C'),
+  ]);
+}
+
+/// Qianchen Desk: live stats of this computer for the left pane of the main window.
+class QcLocalStatsCard extends StatefulWidget {
+  const QcLocalStatsCard({Key? key}) : super(key: key);
+
+  @override
+  State<QcLocalStatsCard> createState() => _QcLocalStatsCardState();
+}
+
+class _QcLocalStatsCardState extends State<QcLocalStatsCard> {
+  Map? _stats;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _poll();
+    _timer = Timer.periodic(const Duration(seconds: 3), (_) => _poll());
+  }
+
+  Future<void> _poll() async {
+    try {
+      final s = jsonDecode(await bind.mainGetCommon(key: 'qc-sys-stats'));
+      if (s is Map && mounted) setState(() => _stats = s);
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_stats == null) return const SizedBox.shrink();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: MyTheme.accent.withOpacity(0.12)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(translate('qc-local-status'),
+            style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).textTheme.bodySmall?.color)),
+        const SizedBox(height: 2),
+        qcStatsRows(context, _stats!, hideMissing: true),
+      ]),
+    );
+  }
+}
+
 class QianchenDevicesPanel extends StatefulWidget {
   final VoidCallback onShowClassic;
   const QianchenDevicesPanel({Key? key, required this.onShowClassic})
@@ -85,7 +203,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     });
     _timer = Timer.periodic(const Duration(seconds: 6), (_) {
       _queryOnlines();
-      if (++_tick % 5 == 0) _fetchIps();
+      if (++_tick % 2 == 0) _fetchIps();
       if (_tick % 10 == 0) _syncAccount();
     });
     Future.delayed(const Duration(milliseconds: 800), () {
@@ -741,6 +859,10 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     final isLan = _isLan(p);
     final pub = _publicIp(p);
     final region = _ips[p.id]?['region']?.toString() ?? '';
+    final pubHint = [
+      if (region.isNotEmpty) region,
+      if (_ips[p.id]?['vpn'] == true) translate('qc-via-vpn'),
+    ].join(' · ');
     final system = [
       if (p.platform.isNotEmpty) p.platform,
       if (p.username.isNotEmpty || p.hostname.isNotEmpty)
@@ -769,46 +891,47 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
             ),
             border: Border.all(color: MyTheme.accent.withOpacity(0.12)),
           ),
-          child: Row(children: [
-            _avatar(context, p, 54, online),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [
-                    Flexible(
+          // Narrow window: the button goes under the name so the name keeps one line.
+          child: LayoutBuilder(builder: (context, c) {
+            final narrow = c.maxWidth < 460;
+            final info = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Flexible(
+                    child: Tooltip(
+                      message: _name(p),
+                      waitDuration: const Duration(milliseconds: 600),
                       child: Text(_name(p),
-                          maxLines: 2,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                               fontSize: 18,
                               height: 1.25,
                               fontWeight: FontWeight.w700)),
                     ),
-                    IconButton(
-                      tooltip: translate('qc-edit-remark'),
-                      visualDensity: VisualDensity.compact,
-                      icon: Icon(Icons.edit_rounded, size: 15, color: muted),
-                      onPressed: () => _editRemark(p, canEdit),
-                    ),
-                  ]),
-                  Wrap(spacing: 6, runSpacing: 4, children: [
-                    if (_isSelf(p))
-                      _chip(translate('qc-this-device'), const Color(0xFFC77A12),
-                          icon: Icons.person_pin_circle_rounded),
-                    _chip(online ? translate('Online') : translate('Offline'),
-                        online ? const Color(0xFF1E9E63) : Colors.grey),
-                    if (isLan)
-                      _chip(translate('qc-lan'), MyTheme.accent,
-                          icon: Icons.lan_rounded),
-                    if (inAb) _chip(translate('My devices'), const Color(0xFF5B6B9A)),
-                  ]),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            ElevatedButton.icon(
+                  ),
+                  IconButton(
+                    tooltip: translate('qc-edit-remark'),
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(Icons.edit_rounded, size: 15, color: muted),
+                    onPressed: () => _editRemark(p, canEdit),
+                  ),
+                ]),
+                Wrap(spacing: 6, runSpacing: 4, children: [
+                  if (_isSelf(p))
+                    _chip(translate('qc-this-device'), const Color(0xFFC77A12),
+                        icon: Icons.person_pin_circle_rounded),
+                  _chip(online ? translate('Online') : translate('Offline'),
+                      online ? const Color(0xFF1E9E63) : Colors.grey),
+                  if (isLan)
+                    _chip(translate('qc-lan'), MyTheme.accent,
+                        icon: Icons.lan_rounded),
+                  if (inAb) _chip(translate('My devices'), const Color(0xFF5B6B9A)),
+                ]),
+              ],
+            );
+            final button = ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                 shape: RoundedRectangleBorder(
@@ -818,8 +941,20 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
               label: Text(translate('Remote control'),
                   style: const TextStyle(fontWeight: FontWeight.w600)),
               onPressed: () => connect(context, p.id),
-            ),
-          ]),
+            );
+            final top = Row(children: [
+              _avatar(context, p, 54, online),
+              const SizedBox(width: 14),
+              Expanded(child: info),
+              if (!narrow) ...[const SizedBox(width: 12), button],
+            ]);
+            if (!narrow) return top;
+            return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              top,
+              const SizedBox(height: 12),
+              button,
+            ]);
+          }),
         ),
         if (!inAb && gFFI.userModel.isLogin)
           Align(
@@ -853,7 +988,8 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
               Divider(height: 1, color: line),
               _infoRow(context, Icons.public_rounded, translate('qc-public-ip'),
                   pub,
-                  copy: pub, hint: region.isEmpty ? null : region),
+                  copy: pub,
+                  hint: pubHint.isEmpty ? null : pubHint),
             ],
             if (system.isNotEmpty) ...[
               Divider(height: 1, color: line),
@@ -866,6 +1002,23 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
             ],
           ]),
         ),
+        if (online) ...[
+          const SizedBox(height: 22),
+          _sectionTitle(context, translate('qc-run-status')),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: Theme.of(context).hoverColor.withOpacity(0.45),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: _ips[p.id]?['stats'] is Map
+                ? qcStatsRows(context, _ips[p.id]!['stats'] as Map)
+                : Text(translate('qc-stats-wait'),
+                        style: TextStyle(fontSize: 12, color: muted))
+                    .paddingSymmetric(vertical: 6),
+          ),
+        ],
         const SizedBox(height: 22),
         _sectionTitle(context, translate('qc-more-ways')),
         const SizedBox(height: 10),

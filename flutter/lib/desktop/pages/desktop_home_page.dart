@@ -9,6 +9,7 @@ import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/widgets/login.dart';
 import 'package:flutter_hbb/common/widgets/animated_rotation_widget.dart';
 import 'package:flutter_hbb/common/widgets/custom_password.dart';
+import 'package:flutter_hbb/desktop/widgets/qianchen_devices.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
@@ -111,6 +112,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       Obx(() => _qcNewBuild.value.isEmpty
           ? const SizedBox.shrink()
           : _buildQcUpdateCard(context)),
+      if (!isIncomingOnly) const QcLocalStatsCard(),
       FutureBuilder<Widget>(
         future: Future.value(
             Obx(() => buildHelpCards(stateGlobal.updateUrl.value))),

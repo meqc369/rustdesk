@@ -255,6 +255,7 @@ async fn start_hbbs_sync_async() {
                 {
                     v["qc_lan"] = json!(crate::lan::local_lan_ipv4s().join(","));
                     v["qc_pk"] = json!(crate::encode64(Config::get_key_pair().1));
+                    v["qc_stats"] = crate::qianchen_stats::snapshot();
                 }
                 let response = crate::post_request(url.clone(), v.to_string(), "").await;
                 if let Err(err) = &response {

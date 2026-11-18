@@ -54,6 +54,8 @@ mod lang;
 mod port_forward;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod qianchen_power;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub mod qianchen_stats;
 mod port_forward_mux;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

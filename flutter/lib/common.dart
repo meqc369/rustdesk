@@ -3229,6 +3229,11 @@ Future<void> start_service(bool is_start) async {
 }
 
 Future<bool> canBeBlocked() async {
+  // Qianchen Desk: one owner on both ends. Upstream greys out and locks this window
+  // when the mouse is moved by a remote controller, which is exactly how the owner
+  // uses it.
+  return false;
+  // ignore: dead_code
   if (isWeb) {
     // Web can only act as a controller, never as a controlled side,
     // so it should never be blocked by a remote session.
