@@ -658,10 +658,11 @@ class _DesktopHomePageState extends State<DesktopHomePage>
       } else if (!isOutgoingOnly &&
           !svcStopped.value &&
           bind.mainIsInstalled() &&
+          bind.mainGetLocalOption(key: 'qc-show-daemon-tip') != 'N' &&
           !bind.mainIsInstalledDaemon(prompt: false)) {
         return buildInstallCard("", "install_daemon_tip", "Install", () async {
           bind.mainIsInstalledDaemon(prompt: true);
-        });
+        }, closeButton: true, closeOption: 'qc-show-daemon-tip');
       }
       //// Disable microphone configuration for macOS. We will request the permission when needed.
       // else if ((await osxCanRecordAudio() !=

@@ -1674,28 +1674,26 @@ impl Client {
     /// machines at home stay on the LAN even when VPNs make them look far apart.
     /// The peer must prove the identity seen on an earlier rendezvous connection.
     async fn qc_try_lan(peer: &str, key: &str) -> Option<(Stream, Option<Vec<u8>>)> {
+        // The device list keeps each device's LAN addresses and server-signed identity in
+        // its peer config, so this costs no round trip. Only addresses on one of our own
+        // subnets are tried: away from home this returns at once.
         let cfg = PeerConfig::load(peer);
-        // The server knows the device's current LAN addresses and can vouch for its identity,
-        // so devices never reached through the rendezvous server can still be used on the LAN.
-        let info = Self::qc_api("peer-info", peer).await;
-        let server_spk = info
-            .as_ref()
-            .and_then(|v| v["spk"].as_str())
-            .and_then(|s| crate::decode64(s).ok())
-            .filter(|s| !s.is_empty());
-        let signed_id_pk = match server_spk {
-            Some(s) => s,
-            None => crate::decode64(cfg.options.get("qc-signed-pk")?).ok()?,
-        };
+        let signed_id_pk = crate::decode64(cfg.options.get("qc-signed-pk")?).ok()?;
+        let subnet = |ip: &str| ip.rsplitn(2, '.').nth(1).map(|x| x.to_owned());
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        let mine: Vec<String> = crate::lan::local_lan_ipv4s()
+            .iter()
+            .filter_map(|ip| subnet(ip))
+            .collect();
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        let mine: Vec<String> = Vec::new();
         let mut ips: Vec<String> = Vec::new();
-        for list in [
-            info.as_ref().and_then(|v| v["lan"].as_str()).unwrap_or_default(),
-            cfg.options.get("qc-lan-ips").map(|x| x.as_str()).unwrap_or_default(),
-        ] {
-            for ip in list.split(',') {
-                if !ip.is_empty() && !ips.iter().any(|x| x == ip) {
-                    ips.push(ip.to_owned());
-                }
+        for ip in cfg.options.get("qc-lan-ips")?.split(',') {
+            if !ip.is_empty()
+                && subnet(ip).map(|s| mine.contains(&s)).unwrap_or(false)
+                && !ips.iter().any(|x| x == ip)
+            {
+                ips.push(ip.to_owned());
             }
         }
         let tries: Vec<_> = ips

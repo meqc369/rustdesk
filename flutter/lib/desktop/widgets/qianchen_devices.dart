@@ -130,7 +130,8 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     if (ids.isNotEmpty) bind.queryOnlines(ids: ids);
   }
 
-  bool _isOnline(Peer p) => _online[p.id] ?? p.online;
+  bool _isOnline(Peer p) =>
+      (_online[p.id] ?? p.online) || _ips[p.id]?['online'] == true;
 
   bool _isSelf(Peer p) =>
       p.id.isNotEmpty &&
@@ -172,6 +173,19 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         _myPublicIp = data['me']?.toString() ?? '';
         _ips = (data['peers'] as Map? ?? {}).map((k, v) =>
             MapEntry(k.toString(), Map<String, dynamic>.from(v as Map)));
+        // Keep LAN addresses and the server-signed identity with the peer, so a
+        // connection can go straight over the LAN without asking the server first.
+        _ips.forEach((id, v) {
+          for (final kv in [
+            ['qc-lan-ips', v['lan']?.toString() ?? ''],
+            ['qc-signed-pk', v['spk']?.toString() ?? ''],
+          ]) {
+            if (kv[1].isNotEmpty &&
+                bind.mainGetPeerOptionSync(id: id, key: kv[0]) != kv[1]) {
+              bind.mainSetPeerOption(id: id, key: kv[0], value: kv[1]);
+            }
+          }
+        });
       }
     } catch (e) {
       debugPrint('peer-ips: $e');
