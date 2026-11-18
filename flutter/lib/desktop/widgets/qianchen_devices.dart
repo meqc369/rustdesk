@@ -186,17 +186,18 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         // connection can go straight over the LAN without asking the server first.
         qcHeartbeatOnline.value = _ips[selfId]?['online'] == true;
         await _probeLan();
-        _ips.forEach((id, v) {
+        // One write at a time: each one loads and stores the whole peer file.
+        for (final e in _ips.entries) {
           for (final kv in [
-            ['qc-lan-ips', v['lan']?.toString() ?? ''],
-            ['qc-signed-pk', v['spk']?.toString() ?? ''],
+            ['qc-lan-ips', e.value['lan']?.toString() ?? ''],
+            ['qc-signed-pk', e.value['spk']?.toString() ?? ''],
           ]) {
             if (kv[1].isNotEmpty &&
-                bind.mainGetPeerOptionSync(id: id, key: kv[0]) != kv[1]) {
-              bind.mainSetPeerOption(id: id, key: kv[0], value: kv[1]);
+                bind.mainGetPeerOptionSync(id: e.key, key: kv[0]) != kv[1]) {
+              await bind.mainSetPeerOption(id: e.key, key: kv[0], value: kv[1]);
             }
           }
-        });
+        }
       }
     } catch (e) {
       debugPrint('peer-ips: $e');
