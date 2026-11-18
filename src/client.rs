@@ -395,7 +395,7 @@ impl Client {
                 let err_str = err.to_string();
                 if interface.get_lch().read().unwrap().other_server.is_none() {
                     if let Some((conn, pk)) = Self::qc_try_relay(peer, key, conn_type).await {
-                        log::info!("Qianchen Desk: connected to {} via heartbeat relay ({})", peer, err_str);
+                        log::warn!("Qianchen Desk: connected to {} via heartbeat relay ({})", peer, err_str);
                         interface.update_direct(Some(false));
                         return Ok(((conn, false, pk, None, "Relay"), (0, String::new())));
                     }
@@ -1708,7 +1708,10 @@ impl Client {
         }
         let mut conn = match timeout(1000, select_ok(tries)).await {
             Ok(Ok((conn, _))) => conn,
-            _ => return None,
+            other => {
+                log::warn!("Qianchen Desk: LAN connect to {} failed: {:?}", peer, other.map(|r| r.map(|_| ())));
+                return None;
+            }
         };
         match timeout(
             3000,
@@ -1716,9 +1719,12 @@ impl Client {
         )
         .await
         {
-            Ok(Ok(pk)) if conn.is_secured() => Some((conn, pk)),
-            _ => {
-                log::info!("Qianchen Desk: LAN address of {} did not verify", peer);
+            Ok(Ok(pk)) if conn.is_secured() => {
+                log::warn!("Qianchen Desk: connected to {} over LAN", peer);
+                Some((conn, pk))
+            }
+            other => {
+                log::warn!("Qianchen Desk: LAN address of {} did not verify: {:?}", peer, other.map(|r| r.map(|_| ())));
                 None
             }
         }
@@ -1740,13 +1746,13 @@ impl Client {
         let url = format!("{}/qc-api/{}", api.trim_end_matches('/'), path);
         let body = serde_json::json!({ "peer_id": peer }).to_string();
         let header = format!("Authorization: Bearer {token}");
-        let text = timeout(4000, crate::post_request(url, body, &header))
+        let text = timeout(10_000, crate::post_request(url, body, &header))
             .await
             .ok()?
             .ok()?;
         let v: serde_json::Value = serde_json::from_str(&text).ok()?;
         if v["code"].as_i64() != Some(0) {
-            log::info!("Qianchen Desk: {} for {}: {}", path, peer, v["message"]);
+            log::warn!("Qianchen Desk: {} for {}: {}", path, peer, v["message"]);
             return None;
         }
         Some(v["data"].clone())
@@ -1763,7 +1769,7 @@ impl Client {
         let uuid = info["uuid"].as_str()?.to_owned();
         let relay = info["relay"].as_str()?.to_owned();
         let signed_id_pk = crate::decode64(info["spk"].as_str()?).ok()?;
-        log::info!("Qianchen Desk: relaying {} through the heartbeat, uuid {}", peer, uuid);
+        log::warn!("Qianchen Desk: relaying {} through the heartbeat, uuid {}", peer, uuid);
         let mut conn = timeout(
             CONNECT_TIMEOUT,
             Self::create_relay(peer, uuid, relay, key, conn_type, true),
@@ -1780,7 +1786,7 @@ impl Client {
         {
             Ok(Ok(pk)) if conn.is_secured() => Some((conn, pk)),
             other => {
-                log::info!("Qianchen Desk: heartbeat relay to {} failed: {:?}", peer, other.map(|r| r.map(|_| ())));
+                log::warn!("Qianchen Desk: heartbeat relay to {} failed: {:?}", peer, other.map(|r| r.map(|_| ())));
                 None
             }
         }

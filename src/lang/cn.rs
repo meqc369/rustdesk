@@ -353,6 +353,7 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("qc-login-expired", "登录已失效（账号密码改过），请重新登录"),
         ("qc-device-offline", "设备不在线"),
         ("qc-cmd-timeout", "设备没有响应，请稍后再试"),
+        ("qc-ready-fallback", "可用：开着 VPN，已改走备用通道（局域网内仍可直连）"),
         ("qc-device-id", "设备代码"),
         ("My devices", "我的设备"),
         ("Classic view", "经典列表"),

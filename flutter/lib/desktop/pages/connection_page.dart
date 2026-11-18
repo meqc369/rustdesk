@@ -122,7 +122,9 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
                     ? kColorWarn
                     : (stateGlobal.svcStatus.value == SvcStatus.ready
                         ? Color.fromARGB(255, 50, 190, 166)
-                        : Color.fromARGB(255, 224, 79, 95)),
+                        : qcHeartbeatOnline.value
+                            ? kColorWarn
+                            : Color.fromARGB(255, 224, 79, 95)),
               ),
             ).marginSymmetric(horizontal: em),
             Container(
@@ -161,7 +163,9 @@ class _OnlineStatusWidgetState extends State<OnlineStatusWidget> {
           : stateGlobal.svcStatus.value == SvcStatus.connecting
               ? translate("connecting_status")
               : stateGlobal.svcStatus.value == SvcStatus.notReady
-                  ? translate("not_ready_status")
+                  ? translate(qcHeartbeatOnline.value
+                      ? "qc-ready-fallback"
+                      : "not_ready_status")
                   : translate('Ready'),
       style: TextStyle(fontSize: em),
     );

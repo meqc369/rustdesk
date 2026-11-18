@@ -19,6 +19,11 @@ import '../../models/peer_model.dart';
 import '../../models/platform_model.dart';
 import '../../utils/http_service.dart' as http;
 
+/// Qianchen Desk: this computer's heartbeat reaches the server even when UDP registration
+/// does not (a VPN), so connections still work; the status bar shows that instead of
+/// "not ready".
+final qcHeartbeatOnline = false.obs;
+
 class QianchenDevicesPanel extends StatefulWidget {
   final VoidCallback onShowClassic;
   const QianchenDevicesPanel({Key? key, required this.onShowClassic})
@@ -41,6 +46,8 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
   // Public IP, region and LAN IPs per device, from the server.
   Map<String, Map<String, dynamic>> _ips = {};
   final Map<String, String> _savedLan = {};
+  // LAN addresses that actually answered on the direct port (21118) from here.
+  final Map<String, bool> _lanOk = {};
   String _myPublicIp = '';
   List<String> _myLanIps = [];
   int _tick = 0;
@@ -158,6 +165,8 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
       // LAN addresses the device reported on our last connection to it.
       _savedLan[id] = bind.mainGetPeerOptionSync(id: id, key: 'qc-lan-ips');
     }
+    final selfId = trimID(gFFI.serverModel.serverId.text);
+    if (selfId.isNotEmpty) ids.add(selfId);
     if (ids.isEmpty || !gFFI.userModel.isLogin) {
       if (mounted) setState(() {});
       return;
@@ -175,6 +184,8 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
             MapEntry(k.toString(), Map<String, dynamic>.from(v as Map)));
         // Keep LAN addresses and the server-signed identity with the peer, so a
         // connection can go straight over the LAN without asking the server first.
+        qcHeartbeatOnline.value = _ips[selfId]?['online'] == true;
+        await _probeLan();
         _ips.forEach((id, v) {
           for (final kv in [
             ['qc-lan-ips', v['lan']?.toString() ?? ''],
@@ -191,6 +202,36 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
       debugPrint('peer-ips: $e');
     }
     if (mounted) setState(() {});
+  }
+
+  /// Same subnet is not proof of being on the same network (another home may also use
+  /// 192.168.0.x), and a VPN makes public IPs differ; so knock on the direct port.
+  Future<void> _probeLan() async {
+    final futures = <Future>[];
+    for (final e in _ips.entries) {
+      final ips = (e.value['lan']?.toString() ?? '')
+          .split(',')
+          .where((ip) => _myLanIps.any((m) => _sameSubnet(m, ip)))
+          .toList();
+      if (ips.isEmpty) {
+        _lanOk.remove(e.key);
+        continue;
+      }
+      futures.add(() async {
+        var ok = false;
+        for (final ip in ips) {
+          try {
+            final s = await Socket.connect(ip, 21118,
+                timeout: const Duration(milliseconds: 500));
+            s.destroy();
+            ok = true;
+            break;
+          } catch (_) {}
+        }
+        _lanOk[e.key] = ok;
+      }());
+    }
+    await Future.wait(futures);
   }
 
   static bool _sameSubnet(String a, String b) {
@@ -214,6 +255,8 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
   bool _isLan(Peer p) {
     final lan = _lanIp(p);
     if (lan.isEmpty || !_myLanIps.any((m) => _sameSubnet(m, lan))) return false;
+    final probed = _lanOk[p.id];
+    if (probed != null) return probed;
     final pub = _publicIp(p);
     return pub.isEmpty || _myPublicIp.isEmpty || pub == _myPublicIp;
   }
