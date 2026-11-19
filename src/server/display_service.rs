@@ -930,6 +930,20 @@ pub fn get_primary_2(all: &Vec<Display>) -> usize {
     all.iter().position(|d| d.is_primary()).unwrap_or(0)
 }
 
+// Qianchen Desk: not in winapi 0.3; flags SDC_APPLY (0x80) | SDC_TOPOLOGY_EXTEND (0x04).
+#[cfg(windows)]
+#[link(name = "user32")]
+extern "system" {
+    #[link_name = "SetDisplayConfig"]
+    fn qc_set_display_config(
+        num_path_array_elements: u32,
+        path_array: *const u8,
+        num_mode_info_array_elements: u32,
+        mode_info_array: *const u8,
+        flags: u32,
+    ) -> i32;
+}
+
 #[inline]
 #[cfg(windows)]
 fn no_displays(displays: &Vec<Display>) -> bool {
@@ -1015,11 +1029,31 @@ pub fn try_get_displays_(add_amyuni_headless: bool) -> ResultType<Vec<Display>> 
 
     let no_displays_v = no_displays(&displays);
     if no_displays_v {
-        log::debug!("no displays, create virtual display");
+        log::warn!("no displays, create virtual display");
         if let Err(e) = virtual_display_manager::plug_in_headless() {
             log::error!("plug in headless failed {}", e);
-        } else {
+        }
+        // Qianchen Desk: Windows attaches the new monitor to the desktop a moment after the
+        // driver reports it (longer right after boot or an update), and reading the list at
+        // once gave the client "No displays". Wait up to 8 s for it. This also covers a plug
+        // refused as "too frequent" while an earlier one is still coming up.
+        for i in 0..40 {
             displays = Display::all()?;
+            if !no_displays(&displays) {
+                log::warn!("virtual display ready after {} ms", i * 200);
+                break;
+            }
+            // Plugged in but not part of the desktop (seen on a PC with no monitor, where
+            // Windows kept its "disconnected display" layout): ask Windows to extend the
+            // desktop onto every connected monitor.
+            if i == 5 || i == 20 {
+                let rc = unsafe { qc_set_display_config(0, std::ptr::null(), 0, std::ptr::null(), 0x80 | 0x04) };
+                log::warn!("SetDisplayConfig(APPLY | TOPOLOGY_EXTEND) = {}", rc);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        if no_displays(&displays) {
+            log::error!("still no displays after plugging in a virtual display");
         }
     }
     Ok(displays)

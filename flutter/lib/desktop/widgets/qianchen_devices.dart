@@ -5,6 +5,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -24,67 +26,268 @@ import '../../utils/http_service.dart' as http;
 /// "not ready".
 final qcHeartbeatOnline = false.obs;
 
-String _qcRate(double b) {
-  if (b < 1024) return '${b.toStringAsFixed(0)}B/s';
-  if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(b < 10240 ? 1 : 0)}K/s';
-  return '${(b / 1024 / 1024).toStringAsFixed(1)}M/s';
-}
-
 String _qcGb(double b) => (b / 1024 / 1024 / 1024).toStringAsFixed(1);
 
-/// Qianchen Desk: CPU / memory / network / temperature rows for a stats map from
-/// qianchen_stats.rs (the heartbeat of another computer, or this one directly).
-Widget qcStatsRows(BuildContext context, Map stats, {bool hideMissing = false}) {
-  final muted = Theme.of(context).textTheme.bodySmall?.color;
+/// Qianchen Desk: colour for a 0..1 load: teal, then amber, then red.
+Color _qcLevelColor(double v) => v >= 0.85
+    ? const Color(0xFFE5484D)
+    : v >= 0.65
+        ? const Color(0xFFF2A33A)
+        : MyTheme.accent;
+
+/// 270° arc gauge with a gradient, glow and ticks; the needle value animates.
+class QcGauge extends StatelessWidget {
+  final double size;
+  final double value; // 0..1
+  final String label;
+  final String text;
+  final String unit;
+  final String sub;
+  final Color? color;
+  const QcGauge(
+      {Key? key,
+      required this.size,
+      required this.value,
+      required this.label,
+      required this.text,
+      this.unit = '',
+      this.sub = '',
+      this.color})
+      : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final fg = Theme.of(context).textTheme.titleLarge?.color ?? Colors.black;
+    final muted = Theme.of(context).textTheme.bodySmall?.color ?? Colors.grey;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(end: value.clamp(0.0, 1.0)),
+      duration: const Duration(milliseconds: 700),
+      curve: Curves.easeOutCubic,
+      builder: (context, v, _) {
+        final c = color ?? _qcLevelColor(v);
+        return SizedBox(
+          width: size,
+          height: size,
+          child: Stack(alignment: Alignment.center, children: [
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _QcGaugePainter(
+                    v,
+                    c,
+                    dark ? Colors.white.withOpacity(0.08) : c.withOpacity(0.10),
+                    muted.withOpacity(0.35),
+                    size * 0.085),
+              ),
+            ),
+            Container(
+              width: size * 0.66,
+              height: size * 0.5,
+              padding: EdgeInsets.only(bottom: size * 0.04),
+              child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(text,
+                        style: TextStyle(
+                            fontSize: size * (text.length > 5 ? 0.13 : 0.22),
+                            height: 1.0,
+                            fontWeight: FontWeight.w700,
+                            color: fg,
+                            fontFeatures: const [FontFeature.tabularFigures()])),
+                    if (unit.isNotEmpty)
+                      Padding(
+                        padding: EdgeInsets.only(left: 1, bottom: size * 0.015),
+                        child: Text(unit,
+                            style: TextStyle(
+                                fontSize: size * 0.10,
+                                height: 1.0,
+                                fontWeight: FontWeight.w600,
+                                color: muted)),
+                      ),
+                  ],
+                ),
+                if (sub.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(top: size * 0.04),
+                    child: Text(sub,
+                        maxLines: 1,
+                        style: TextStyle(
+                            fontSize: size * 0.085, height: 1.0, color: muted)),
+                  ),
+              ]),
+              ),
+            ),
+            Positioned(
+              bottom: size * 0.02,
+              child: Text(label,
+                  style: TextStyle(
+                      fontSize: size * 0.095,
+                      height: 1.0,
+                      fontWeight: FontWeight.w600,
+                      color: c)),
+            ),
+          ]),
+        );
+      },
+    );
+  }
+}
+
+class _QcGaugePainter extends CustomPainter {
+  final double v;
+  final Color color;
+  final Color track;
+  final Color tick;
+  final double stroke;
+  _QcGaugePainter(this.v, this.color, this.track, this.tick, this.stroke);
+
+  static const _start = 0.75 * pi;
+  static const _sweep = 1.5 * pi;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final r = size.shortestSide / 2 - stroke / 2 - 1;
+    final rect = Rect.fromCircle(center: center, radius: r);
+    canvas.drawArc(
+        rect,
+        _start,
+        _sweep,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = stroke
+          ..strokeCap = StrokeCap.round
+          ..color = track);
+    // Ticks inside the track, every 10 %.
+    final tp = Paint()
+      ..color = tick
+      ..strokeWidth = 1
+      ..strokeCap = StrokeCap.round;
+    for (var i = 0; i <= 10; i++) {
+      final a = _start + _sweep * i / 10;
+      final r1 = r - stroke / 2 - 3;
+      final r2 = r1 - (i % 5 == 0 ? stroke * 0.8 : stroke * 0.45);
+      canvas.drawLine(center + Offset(cos(a), sin(a)) * r1,
+          center + Offset(cos(a), sin(a)) * r2, tp);
+    }
+    if (v <= 0.002) return;
+    final sweep = _sweep * v;
+    final shader = SweepGradient(
+      colors: [color.withOpacity(0.35), color],
+      stops: const [0.0, 1.0],
+      endAngle: max(sweep, 0.01),
+      transform: const GradientRotation(_start),
+    ).createShader(rect);
+    // Soft glow under the value arc.
+    canvas.drawArc(
+        rect,
+        _start,
+        sweep,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = stroke
+          ..strokeCap = StrokeCap.round
+          ..color = color.withOpacity(0.35)
+          ..maskFilter = MaskFilter.blur(BlurStyle.normal, stroke * 0.6));
+    canvas.drawArc(
+        rect,
+        _start,
+        sweep,
+        false,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = stroke
+          ..strokeCap = StrokeCap.round
+          ..shader = shader);
+    // Bright dot at the tip.
+    final a = _start + sweep;
+    canvas.drawCircle(center + Offset(cos(a), sin(a)) * r, stroke * 0.32,
+        Paint()..color = Colors.white.withOpacity(0.9));
+  }
+
+  @override
+  bool shouldRepaint(_QcGaugePainter old) =>
+      old.v != v || old.color != color || old.track != track;
+}
+
+String _qcShortRate(double b) {
+  if (b < 1024) return '${b.toStringAsFixed(0)}B';
+  if (b < 1024 * 1024) return '${(b / 1024).toStringAsFixed(b < 10240 ? 1 : 0)}K';
+  return '${(b / 1024 / 1024).toStringAsFixed(1)}M';
+}
+
+/// Qianchen Desk: CPU / memory / network / temperature gauges for a stats map from
+/// qianchen_stats.rs (another computer's heartbeat, or this one directly).
+/// [columns] 4 = one row (device panel), 2 = a 2×2 grid (left pane).
+Widget qcStatsGauges(BuildContext context, Map stats,
+    {int columns = 4, double maxSize = 132}) {
   double n(String k) => (stats[k] as num?)?.toDouble() ?? 0;
   final cpu = n('cpu').clamp(0, 100).toDouble();
   final memTotal = n('mem_total');
-  final mem = memTotal > 0 ? (n('mem') / memTotal * 100).clamp(0, 100).toDouble() : 0.0;
-  final temp = stats['temp'] as num?;
-  Widget row(IconData icon, String label, String value, [double? pct]) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Row(children: [
-            Icon(icon, size: 15, color: muted),
-            const SizedBox(width: 6),
-            Text(label, style: TextStyle(fontSize: 12, color: muted)),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(value,
-                  textAlign: TextAlign.right,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
-            ),
-          ]),
-          if (pct != null) ...[
-            const SizedBox(height: 5),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(3),
-              child: LinearProgressIndicator(
-                value: pct / 100,
-                minHeight: 4,
-                backgroundColor: MyTheme.accent.withOpacity(0.10),
-                color: pct >= 90
-                    ? const Color(0xFFD9534F)
-                    : pct >= 70
-                        ? const Color(0xFFE0A030)
-                        : MyTheme.accent,
-              ),
-            ),
-          ],
-        ]),
-      );
-  return Column(children: [
-    row(Icons.memory_rounded, 'CPU', '${cpu.toStringAsFixed(0)}%', cpu),
-    if (memTotal > 0)
-      row(Icons.storage_rounded, translate('qc-stat-mem'),
-          '${mem.toStringAsFixed(0)}% · ${_qcGb(n('mem'))}/${_qcGb(memTotal)} GB', mem),
-    row(Icons.swap_vert_rounded, translate('qc-stat-net'),
-        '↓${_qcRate(n('rx'))}  ↑${_qcRate(n('tx'))}'),
-    if (temp != null || !hideMissing)
-      row(Icons.thermostat_rounded, translate('qc-stat-temp'),
-          temp == null ? translate('qc-stat-na') : '${temp.toStringAsFixed(0)}°C'),
-  ]);
+  final mem =
+      memTotal > 0 ? (n('mem') / memTotal * 100).clamp(0, 100).toDouble() : 0.0;
+  final rx = n('rx'), tx = n('tx');
+  // Network on a log scale: 1 KB/s empty, 100 MB/s full.
+  final total = rx + tx;
+  final netV = total <= 1024
+      ? 0.0
+      : ((log(total) / ln10 - 3) / 5).clamp(0.0, 1.0).toDouble();
+  final temp = (stats['temp'] as num?)?.toDouble();
+  return LayoutBuilder(builder: (context, box) {
+    const gap = 10.0;
+    final size = min(maxSize, (box.maxWidth - gap * (columns - 1)) / columns);
+    final gauges = <Widget>[
+      QcGauge(
+          size: size,
+          value: cpu / 100,
+          label: 'CPU',
+          text: cpu.toStringAsFixed(0),
+          unit: '%'),
+      QcGauge(
+          size: size,
+          value: mem / 100,
+          label: translate('qc-stat-mem'),
+          text: mem.toStringAsFixed(0),
+          unit: '%',
+          sub: memTotal > 0
+              ? '${_qcGb(n('mem'))}/${_qcGb(memTotal)}G'
+              : ''),
+      QcGauge(
+          size: size,
+          value: netV,
+          label: translate('qc-stat-net'),
+          text: '↓${_qcShortRate(rx)}',
+          sub: '↑${_qcShortRate(tx)}',
+          color: const Color(0xFF3B82F6)),
+      QcGauge(
+          size: size,
+          value: temp == null ? 0 : (temp - 20) / 80,
+          label: translate('qc-stat-temp'),
+          text: temp == null ? '--' : temp.toStringAsFixed(0),
+          unit: temp == null ? '' : '°C',
+          sub: temp == null ? translate('qc-stat-na') : ''),
+    ];
+    final rows = <Widget>[];
+    for (var i = 0; i < gauges.length; i += columns) {
+      final row = gauges.sublist(i, min(i + columns, gauges.length));
+      rows.add(Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: row));
+    }
+    return Column(
+        children: [
+      for (var i = 0; i < rows.length; i++) ...[
+        if (i > 0) const SizedBox(height: gap),
+        rows[i],
+      ]
+    ]);
+  });
 }
 
 /// Qianchen Desk: live stats of this computer for the left pane of the main window.
@@ -136,7 +339,7 @@ class _QcLocalStatsCardState extends State<QcLocalStatsCard> {
                 fontSize: 12,
                 color: Theme.of(context).textTheme.bodySmall?.color)),
         const SizedBox(height: 2),
-        qcStatsRows(context, _stats!, hideMissing: true),
+        qcStatsGauges(context, _stats!, columns: 2, maxSize: 100),
       ]),
     );
   }
@@ -1007,13 +1210,13 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
           _sectionTitle(context, translate('qc-run-status')),
           const SizedBox(height: 10),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
               color: Theme.of(context).hoverColor.withOpacity(0.45),
               borderRadius: BorderRadius.circular(14),
             ),
             child: _ips[p.id]?['stats'] is Map
-                ? qcStatsRows(context, _ips[p.id]!['stats'] as Map)
+                ? qcStatsGauges(context, _ips[p.id]!['stats'] as Map)
                 : Text(translate('qc-stats-wait'),
                         style: TextStyle(fontSize: 12, color: muted))
                     .paddingSymmetric(vertical: 6),
