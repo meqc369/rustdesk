@@ -126,7 +126,14 @@ pub fn qc_newer_build() -> ResultType<Option<(u64, String, String, u64)>> {
     if build <= current {
         return Ok(None);
     }
-    let a = &v[if cfg!(target_os = "windows") { "windows" } else { "macos" }];
+    // Intel Macs have their own package; Apple silicon keeps the original "macos" key.
+    let a = &v[if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_arch = "x86_64") {
+        "macos_x64"
+    } else {
+        "macos"
+    }];
     let (Some(u), Some(sha), Some(size)) =
         (a["url"].as_str(), a["sha256"].as_str(), a["size"].as_u64())
     else {
