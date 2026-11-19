@@ -127,7 +127,9 @@ pub fn qc_newer_build() -> ResultType<Option<(u64, String, String, u64)>> {
         return Ok(None);
     }
     // Intel Macs have their own package; Apple silicon keeps the original "macos" key.
-    let a = &v[if cfg!(target_os = "windows") {
+    let a = &v[if cfg!(all(target_os = "windows", target_arch = "x86")) {
+        "windows_x86" // 32-bit Windows (Sciter build)
+    } else if cfg!(target_os = "windows") {
         "windows"
     } else if cfg!(target_arch = "x86_64") {
         "macos_x64"
