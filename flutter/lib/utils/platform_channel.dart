@@ -37,6 +37,10 @@ class RdPlatformChannel {
         .invokeMethod("setWindowTheme", {"themeName": theme.name});
   }
 
+  /// Qianchen Desk: keep this window above other apps (macOS).
+  Future<void> setWindowOnTop(bool on) =>
+      _hostMethodChannel.invokeMethod("setWindowOnTop", {"on": on});
+
   /// Terminate .app manually.
   Future<void> terminate() {
     assert(isMacOS);

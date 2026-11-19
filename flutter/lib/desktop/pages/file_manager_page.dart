@@ -237,15 +237,22 @@ class _FileManagerPageState extends State<FileManagerPage>
           },
           child: Stack(children: [
             fileView,
-            Obx(() => (candidate.isNotEmpty && hover.value) ||
-                    (!isLocal && _dropMaskVisible.value)
+            // Read every observable up front: an Obx that reads none (the local pane,
+            // where the condition short-circuits) throws, and release builds paint the
+            // error as a grey box over the whole pane.
+            Obx(() {
+              final hovering = hover.value;
+              final osDrag = _dropMaskVisible.value;
+              final dir = fileView.controller.qcDropDir.value;
+              return (candidate.isNotEmpty && hovering) || (!isLocal && osDrag)
                 ? Positioned.fill(
-                    child: mask(fileView.controller.qcDropDir.value != null
-                        ? '${translate('qc-drop-into')}${fileView.controller.qcDropDir.value!.name}'
+                    child: mask(dir != null
+                        ? '${translate('qc-drop-into')}${dir.name}'
                         : translate(isLocal
                             ? 'qc-drop-download'
                             : 'qc-drop-upload')))
-                : const SizedBox.shrink()),
+                : const SizedBox.shrink();
+            }),
           ])),
     );
   }

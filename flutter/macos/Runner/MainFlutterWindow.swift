@@ -73,7 +73,10 @@ class MainFlutterWindow: NSWindow {
             // DesktopLifecyclePlugin.register(with: controller.registrar(forPlugin: "DesktopLifecyclePlugin"))
             // Note: copy below from above RegisterGeneratedPlugins
             self.setMethodHandler(registrar: controller.registrar(forPlugin: "RustDeskPlugin"))
-            DesktopDropPlugin.register(with: controller.registrar(forPlugin: "DesktopDropPlugin"))
+            // Qianchen Desk: DesktopDropPlugin always attaches to the main window, so files
+            // dropped on a file transfer window never arrived (and drops on the main window
+            // went to the last sub-window). Attach the drop view to this window instead.
+            QcDropTarget.attach(to: controller)
             DeviceInfoPlusMacosPlugin.register(with: controller.registrar(forPlugin: "DeviceInfoPlusMacosPlugin"))
             FlutterCustomCursorPlugin.register(with: controller.registrar(forPlugin: "FlutterCustomCursorPlugin"))
             FPPPackageInfoPlusPlugin.register(with: controller.registrar(forPlugin: "FPPPackageInfoPlusPlugin"))
@@ -216,6 +219,11 @@ class MainFlutterWindow: NSWindow {
                 case "terminate":
                     NSApplication.shared.terminate(self)
                     result(nil)
+                case "setWindowOnTop":
+                    // Qianchen Desk: pin a window (file transfer) above other apps.
+                    let on = (call.arguments as? [String: Any])?["on"] as? Bool ?? false
+                    registrar.view?.window?.level = on ? .floating : .normal
+                    result(nil)
                 case "canRecordAudio":
                     switch AVCaptureDevice.authorizationStatus(for: .audio) {
                     case .authorized:
@@ -312,5 +320,56 @@ class MainFlutterWindow: NSWindow {
                     result(FlutterMethodNotImplemented)
                 }
         })
+    }
+}
+
+
+/// Qianchen Desk: same protocol as desktop_drop's DropTarget ("entered", "updated", "exited",
+/// "performOperation" on the "desktop_drop" channel), attached to one Flutter view.
+class QcDropTarget: NSView {
+    private let channel: FlutterMethodChannel
+
+    static func attach(to controller: FlutterViewController) {
+        let channel = FlutterMethodChannel(
+            name: "desktop_drop",
+            binaryMessenger: controller.registrar(forPlugin: "QcDesktopDrop").messenger)
+        channel.setMethodCallHandler { _, result in result(FlutterMethodNotImplemented) }
+        let view = QcDropTarget(frame: controller.view.bounds, channel: channel)
+        view.autoresizingMask = [.width, .height]
+        view.registerForDraggedTypes([NSPasteboard.PasteboardType.fileURL])
+        controller.view.addSubview(view)
+    }
+
+    init(frame: NSRect, channel: FlutterMethodChannel) {
+        self.channel = channel
+        super.init(frame: frame)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    private func point(_ p: NSPoint) -> [CGFloat] {
+        let local = convert(p, from: nil)
+        return [local.x, bounds.height - local.y]
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        channel.invokeMethod("entered", arguments: point(sender.draggingLocation))
+        return .copy
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        channel.invokeMethod("updated", arguments: point(sender.draggingLocation))
+        return .copy
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        channel.invokeMethod("exited", arguments: nil)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let urls = (sender.draggingPasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        channel.invokeMethod("performOperation", arguments: urls.map { $0.path })
+        return true
     }
 }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ffi' as ffi;
 
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +13,7 @@ import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:get/get.dart';
 
 import '../../models/platform_model.dart';
+import '../../utils/platform_channel.dart';
 
 /// File Transfer for multi tabs
 class FileManagerTabPage extends StatefulWidget {
@@ -116,7 +118,11 @@ class _FileManagerTabPageState extends State<FileManagerTabPage> {
         body: DesktopTab(
           controller: tabController,
           onWindowCloseButton: handleWindowCloseButton,
-          tail: const AddButton(),
+          tail: Row(mainAxisSize: MainAxisSize.min, children: const [
+            _QcHomeButton(),
+            _QcPinButton(),
+            AddButton(),
+          ]),
           selectedBorderColor: MyTheme.accent,
           labelGetter: DesktopTab.tablabelGetter,
         ));
@@ -176,4 +182,65 @@ class _FileManagerTabPageState extends State<FileManagerTabPage> {
       return res;
     }
   }
+}
+
+
+/// Qianchen Desk: bring the main window (device list) to the front.
+class _QcHomeButton extends StatelessWidget {
+  const _QcHomeButton();
+
+  @override
+  Widget build(BuildContext context) => ActionIcon(
+      message: 'qc-show-home',
+      icon: Icons.home_outlined,
+      onTap: () =>
+          rustDeskWinManager.call(WindowType.Main, kWindowMainWindowOnTop, ""));
+}
+
+/// Qianchen Desk: keep the file transfer window above every other window; click again
+/// to release it.
+class _QcPinButton extends StatefulWidget {
+  const _QcPinButton();
+
+  @override
+  State<_QcPinButton> createState() => _QcPinButtonState();
+}
+
+class _QcPinButtonState extends State<_QcPinButton> {
+  bool _pinned = false;
+
+  static void _setWindowsTopmost(bool on) {
+    // The window that was just clicked is the foreground window.
+    final user32 = ffi.DynamicLibrary.open('user32.dll');
+    final getForeground = user32.lookupFunction<ffi.IntPtr Function(),
+        int Function()>('GetForegroundWindow');
+    final setWindowPos = user32.lookupFunction<
+        ffi.Int32 Function(ffi.IntPtr, ffi.IntPtr, ffi.Int32, ffi.Int32,
+            ffi.Int32, ffi.Int32, ffi.Uint32),
+        int Function(int, int, int, int, int, int, int)>('SetWindowPos');
+    const swpNoSizeMoveActivate = 0x0001 | 0x0002 | 0x0010;
+    setWindowPos(getForeground(), on ? -1 : -2, 0, 0, 0, 0, swpNoSizeMoveActivate);
+  }
+
+  Future<void> _toggle() async {
+    final on = !_pinned;
+    try {
+      if (isMacOS) {
+        await RdPlatformChannel.instance.setWindowOnTop(on);
+      } else if (isWindows) {
+        _setWindowsTopmost(on);
+      } else {
+        return;
+      }
+      setState(() => _pinned = on);
+    } catch (e) {
+      debugPrint('pin window: $e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ActionIcon(
+      message: _pinned ? 'qc-unpin-window' : 'qc-pin-window',
+      icon: _pinned ? Icons.push_pin : Icons.push_pin_outlined,
+      onTap: _toggle);
 }

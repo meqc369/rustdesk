@@ -10,6 +10,15 @@ class AppDelegate: FlutterAppDelegate {
     return false
   }
     
+    // Qianchen Desk: clicking the Dock icon brings the device list forward even while a
+    // file transfer or remote window is open (otherwise it stays hidden behind them).
+    override func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if flag, let main = mainFlutterWindow {
+            main.makeKeyAndOrderFront(nil)
+        }
+        return true
+    }
+
     override func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
         if (launched) {
             handle_applicationShouldOpenUntitledFile();

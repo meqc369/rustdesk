@@ -3,6 +3,7 @@
 #include <desktop_multi_window/desktop_multi_window_plugin.h>
 #include <texture_rgba_renderer/texture_rgba_renderer_plugin_c_api.h>
 #include <flutter_gpu_texture_renderer/flutter_gpu_texture_renderer_plugin_c_api.h>
+#include <desktop_drop/desktop_drop_plugin.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -153,6 +154,9 @@ bool FlutterWindow::OnCreate() {
         registry->GetRegistrarForPlugin("TextureRgbaRendererPlugin"));
     FlutterGpuTextureRendererPluginCApiRegisterWithRegistrar(
         registry->GetRegistrarForPlugin("FlutterGpuTextureRendererPluginCApi"));
+    // Qianchen Desk: files dropped from Explorer onto a file transfer window.
+    DesktopDropPluginRegisterWithRegistrar(
+        registry->GetRegistrarForPlugin("DesktopDropPlugin"));
   });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
