@@ -27,6 +27,8 @@ lazy_static::lazy_static! {
     static ref QC_ACK: Mutex<Option<Value>> = Default::default();
     // Qianchen Desk: base64 JPEG thumbnail waiting for the next heartbeat.
     static ref QC_THUMB: Mutex<Option<String>> = Default::default();
+    // Qianchen Desk: why the last console command was refused (reported once to the server).
+    static ref QC_REJECT: Mutex<Option<String>> = Default::default();
 }
 
 #[cfg(not(any(target_os = "ios")))]
@@ -260,6 +262,13 @@ async fn start_hbbs_sync_async() {
                     v["qc_pk"] = json!(crate::encode64(Config::get_key_pair().1));
                     v["qc_stats"] = crate::qianchen_stats::snapshot();
                     v["qc_mac"] = json!(crate::lan::local_macs().join(","));
+                    v["qc_t"] = json!(std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0));
+                    if let Some(r) = QC_REJECT.lock().unwrap().take() {
+                        v["qc_rej"] = json!(r);
+                    }
                     if let Some(jpg) = QC_THUMB.lock().unwrap().take() {
                         v["qc_thumb"] = json!(jpg);
                     }
@@ -284,8 +293,10 @@ async fn start_hbbs_sync_async() {
                             });
                         }
                         if let Some(cmd) = rsp.remove("qc_cmd") {
+                            // The server's clock, so a device with a wrong clock still takes commands.
+                            let server_now = rsp.get("qc_now").and_then(|v| v.as_i64());
                             if let Some(cmd) = cmd.as_str() {
-                                handle_qc_cmd(&id, cmd).await;
+                                handle_qc_cmd(&id, cmd, server_now).await;
                             }
                         }
                         if let Some(conns)  = rsp.remove("disconnect") {
@@ -319,25 +330,35 @@ async fn start_hbbs_sync_async() {
 /// Qianchen Desk: run a command from the web console. The server signs it with the
 /// rendezvous key the client already trusts; replays and stale commands are refused.
 #[cfg(not(any(target_os = "ios")))]
-async fn handle_qc_cmd(id: &str, signed: &str) {
-    let key = crate::get_key(true).await;
-    let Some(pk) = crate::common::get_rs_pk(&key) else { return };
-    let Ok(raw) = crate::decode64(signed) else { return };
-    let Ok(payload) = hbb_common::sodiumoxide::crypto::sign::verify(&raw, &pk) else {
-        log::warn!("Rejected unsigned console command");
-        return;
+async fn handle_qc_cmd(id: &str, signed: &str, server_now: Option<i64>) {
+    let reject = |why: String| {
+        log::warn!("Rejected console command: {why}");
+        *QC_REJECT.lock().unwrap() = Some(why);
     };
-    let Ok(cmd) = serde_json::from_slice::<Value>(&payload) else { return };
+    let key = crate::get_key(true).await;
+    let Some(pk) = crate::common::get_rs_pk(&key) else {
+        return reject(format!("bad key ({} chars)", key.len()));
+    };
+    let Ok(raw) = crate::decode64(signed) else { return reject("not base64".to_owned()) };
+    let Ok(payload) = hbb_common::sodiumoxide::crypto::sign::verify(&raw, &pk) else {
+        return reject(format!("signature, key {}", &key.chars().take(8).collect::<String>()));
+    };
+    let Ok(cmd) = serde_json::from_slice::<Value>(&payload) else { return reject("json".to_owned()) };
     let cid = cmd["cid"].as_i64().unwrap_or(0);
     let ts = cmd["ts"].as_i64().unwrap_or(0);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let now = server_now.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    });
     let last = LocalConfig::get_option("qc-last-cmd").parse::<i64>().unwrap_or(0);
     if cmd["id"].as_str() != Some(id) || cid <= last || (now - ts).abs() > 600 {
-        log::warn!("Rejected console command {cid}");
-        return;
+        return reject(format!(
+            "cid {cid} last {last} id {:?}/{id} skew {}",
+            cmd["id"].as_str(),
+            now - ts
+        ));
     }
     LocalConfig::set_option("qc-last-cmd".to_owned(), cid.to_string());
     let action = cmd["action"].as_str().unwrap_or_default().to_owned();
