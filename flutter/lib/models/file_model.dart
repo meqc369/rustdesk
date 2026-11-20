@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/widgets/dialog.dart';
 import 'package:flutter_hbb/utils/download_paths.dart';
@@ -1228,6 +1229,15 @@ class JobController {
     jobTable.refresh();
     if (job.state == JobState.done || job.state == JobState.error) {
       unregisterTransferConflictJob(id);
+    }
+    // Qianchen Desk: a short beep when the last running transfer has finished.
+    if (job.type == JobType.transfer &&
+        job.state == JobState.done &&
+        job.err != 'cancel' &&
+        !jobTable.any((j) =>
+            j.type == JobType.transfer &&
+            (j.state == JobState.inProgress || j.state == JobState.none))) {
+      SystemSound.play(SystemSoundType.alert);
     }
     if (job.type == JobType.deleteDir) {
       return job.state == JobState.done;
