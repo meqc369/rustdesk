@@ -58,6 +58,8 @@ mod qianchen_power;
 pub mod qianchen_stats;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod qianchen_thumb;
+#[cfg(windows)]
+pub mod qianchen_audio;
 mod port_forward_mux;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

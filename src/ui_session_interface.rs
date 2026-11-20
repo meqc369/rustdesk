@@ -578,6 +578,15 @@ impl<T: InvokeUiSession> Session<T> {
         self.send(Data::Message(msg));
     }
 
+    /// Qianchen Desk: mute or restore the remote computer's speakers.
+    pub fn qc_mute_remote(&self, on: bool) {
+        let mut misc = Misc::new();
+        misc.set_qc_mute_speaker(on);
+        let mut msg = Message::new();
+        msg.set_misc(misc);
+        self.send(Data::Message(msg));
+    }
+
     pub fn shutdown_remote_device(&self) {
         let msg = self.lc.read().unwrap().shutdown_remote_device();
         self.send(Data::Message(msg));

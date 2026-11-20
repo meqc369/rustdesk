@@ -846,6 +846,9 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     if (widget.ffi.connType == ConnType.defaultConn) {
       toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
     }
+    if (widget.ffi.connType == ConnType.defaultConn && !isWeb) {
+      toolbarItems.add(_QcAudioMenu(id: widget.id, ffi: widget.ffi));
+    }
     toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
     if (!isWeb) {
       toolbarItems.add(_VoiceCallMenu(id: widget.id, ffi: widget.ffi));
@@ -2888,6 +2891,78 @@ class _ChatMenuState extends State<_ChatMenu> {
       onPressed: () =>
           bind.sessionRequestVoiceCall(sessionId: widget.ffi.sessionId),
     );
+  }
+}
+
+/// Qianchen Desk: where the remote computer's sound plays. "Play here" is the upstream
+/// Mute option inverted; "mute the remote speakers" asks a Windows peer to mute its own
+/// output while its sound is still sent here (remembered per device, undone on disconnect).
+class _QcAudioMenu extends StatefulWidget {
+  final String id;
+  final FFI ffi;
+  const _QcAudioMenu({Key? key, required this.id, required this.ffi})
+      : super(key: key);
+
+  @override
+  State<_QcAudioMenu> createState() => _QcAudioMenuState();
+}
+
+class _QcAudioMenuState extends State<_QcAudioMenu> {
+  static const _kMuteRemote = 'qc-mute-remote';
+  late bool _muteRemote =
+      bind.mainGetPeerOptionSync(id: widget.id, key: _kMuteRemote) == 'Y';
+
+  bool get _windowsPeer =>
+      widget.ffi.ffiModel.pi.platform == kPeerPlatformWindows;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_muteRemote && _windowsPeer) _sendMuteRemote(true);
+  }
+
+  void _sendMuteRemote(bool on) => bind.sessionSetCommon(
+      sessionId: widget.ffi.sessionId, key: _kMuteRemote, value: on ? 'Y' : 'N');
+
+  @override
+  Widget build(BuildContext context) {
+    final playHere = !bind.sessionGetToggleOptionSync(
+        sessionId: widget.ffi.sessionId, arg: 'disable-audio');
+    final allowed = widget.ffi.ffiModel.permissions['audio'] != false;
+    return _IconSubmenuButton(
+        tooltip: 'qc-sound',
+        icon: Icon(playHere ? Icons.volume_up_rounded : Icons.volume_off_rounded,
+            color: Colors.white, size: 20),
+        ffi: widget.ffi,
+        color: _ToolbarTheme.blueColor,
+        hoverColor: _ToolbarTheme.hoverBlueColor,
+        menuChildrenGetter: (_) => [
+              CkbMenuButton(
+                  value: playHere,
+                  ffi: widget.ffi,
+                  onChanged: allowed
+                      ? (_) async {
+                          await bind.sessionToggleOption(
+                              sessionId: widget.ffi.sessionId,
+                              value: 'disable-audio');
+                          setState(() {});
+                        }
+                      : null,
+                  child: Text(translate('qc-sound-play-here'))),
+              CkbMenuButton(
+                  value: _muteRemote,
+                  ffi: widget.ffi,
+                  onChanged: allowed && _windowsPeer
+                      ? (v) {
+                          final on = v == true;
+                          setState(() => _muteRemote = on);
+                          bind.mainSetPeerOption(
+                              id: widget.id, key: _kMuteRemote, value: on ? 'Y' : '');
+                          _sendMuteRemote(on);
+                        }
+                      : null,
+                  child: Text(translate('qc-sound-mute-remote'))),
+            ]);
   }
 }
 

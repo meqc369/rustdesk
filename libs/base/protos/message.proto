@@ -876,6 +876,8 @@ message Misc {
     bool shutdown_remote_device = 1001;
     // Qianchen Desk: ask this device to send Wake-on-LAN packets to these MACs (comma separated).
     string qc_wake_on_lan = 1002;
+    // Qianchen Desk: mute (true) or restore (false) the controlled computer's speakers.
+    bool qc_mute_speaker = 1003;
   }
 }
 

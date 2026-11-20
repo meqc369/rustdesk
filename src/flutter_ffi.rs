@@ -3151,6 +3151,10 @@ pub fn session_set_common(session_id: SessionID, key: String, value: String) {
             s.continue_insecure_connection(value == "Y");
             return;
         }
+        if key == "qc-mute-remote" {
+            s.qc_mute_remote(value == "Y");
+            return;
+        }
     }
 }
 

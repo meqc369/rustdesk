@@ -3974,6 +3974,12 @@ impl Connection {
                             }
                         }
                     }
+                    Some(misc::Union::QcMuteSpeaker(_on)) => {
+                        #[cfg(windows)]
+                        if self.audio {
+                            crate::qianchen_audio::set_speaker_mute(self.inner.id, _on);
+                        }
+                    }
                     Some(misc::Union::QcWakeOnLan(_macs)) => {
                         // Relay a wake-up for another device on this LAN. Same permission as restart.
                         #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -5334,6 +5340,9 @@ impl Connection {
             return;
         }
         self.closed = true;
+        // Qianchen Desk: give the speakers back if this session muted them.
+        #[cfg(windows)]
+        crate::qianchen_audio::set_speaker_mute(self.inner.id, false);
         // If voice A,B -> C, and A,B has voice call
         // B disconnects, C will reset the voice call input.
         //
