@@ -25,6 +25,8 @@ lazy_static::lazy_static! {
     static ref PRO: Arc<Mutex<bool>> = Default::default();
     // Qianchen Desk: result of the last console command, sent with the next heartbeat.
     static ref QC_ACK: Mutex<Option<Value>> = Default::default();
+    // Qianchen Desk: base64 JPEG thumbnail waiting for the next heartbeat.
+    static ref QC_THUMB: Mutex<Option<String>> = Default::default();
 }
 
 #[cfg(not(any(target_os = "ios")))]
@@ -234,7 +236,8 @@ async fn start_hbbs_sync_async() {
                 // Qianchen Desk: while the rendezvous server is unreachable over UDP, the heartbeat
                 // is how relay requests reach us, so send it every tick (3 s).
                 let registered = config::get_online_state() > 0;
-                if registered && conns.is_empty() && QC_ACK.lock().unwrap().is_none() && last_sent.map(|x| x.elapsed() < TIME_HEARTBEAT).unwrap_or(false) {
+                let thumb_ready = QC_THUMB.lock().unwrap().is_some();
+                if registered && conns.is_empty() && QC_ACK.lock().unwrap().is_none() && !thumb_ready && last_sent.map(|x| x.elapsed() < TIME_HEARTBEAT).unwrap_or(false) {
                     continue;
                 }
                 last_sent = Some(Instant::now());
@@ -256,6 +259,10 @@ async fn start_hbbs_sync_async() {
                     v["qc_lan"] = json!(crate::lan::local_lan_ipv4s().join(","));
                     v["qc_pk"] = json!(crate::encode64(Config::get_key_pair().1));
                     v["qc_stats"] = crate::qianchen_stats::snapshot();
+                    v["qc_mac"] = json!(crate::lan::local_macs().join(","));
+                    if let Some(jpg) = QC_THUMB.lock().unwrap().take() {
+                        v["qc_thumb"] = json!(jpg);
+                    }
                 }
                 let response = crate::post_request(url.clone(), v.to_string(), "").await;
                 if let Err(err) = &response {
@@ -267,6 +274,14 @@ async fn start_hbbs_sync_async() {
                             info_uploaded.uploaded = false;
                             config::Status::set("sysinfo_hash", "".to_owned());
                             log::info!("sysinfo required to forcely update");
+                        }
+                        // Qianchen Desk: someone is looking at the thumbnail view.
+                        #[cfg(any(target_os = "windows", target_os = "macos"))]
+                        if rsp.remove("qc_thumb").is_some() && conns.is_empty() {
+                            std::thread::spawn(|| match crate::qianchen_thumb::capture_jpeg() {
+                                Ok(jpg) => *QC_THUMB.lock().unwrap() = Some(crate::encode64(jpg)),
+                                Err(e) => log::debug!("thumbnail: {e}"),
+                            });
                         }
                         if let Some(cmd) = rsp.remove("qc_cmd") {
                             if let Some(cmd) = cmd.as_str() {
@@ -388,6 +403,17 @@ async fn handle_qc_cmd(id: &str, signed: &str) {
                     (true, String::new())
                 }
                 _ => (false, "relay unavailable".to_owned()),
+            }
+        }
+        "wake" => {
+            // Qianchen Desk: scheduled power-on, sent to a device on the target's LAN.
+            let macs = cmd["macs"].as_str().unwrap_or_default().to_owned();
+            if macs.is_empty() {
+                (false, "no mac".to_owned())
+            } else {
+                #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+                crate::lan::send_wol_macs(&macs);
+                (true, String::new())
             }
         }
         "lock" => {

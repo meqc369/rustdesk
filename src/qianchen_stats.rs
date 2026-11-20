@@ -1,6 +1,6 @@
 //! Qianchen Desk: CPU, memory, network and temperature of this computer. Sent with the
 //! heartbeat so the device panel on other computers can show them.
-use hbb_common::sysinfo::{Components, Networks, System};
+use hbb_common::sysinfo::{Components, Disks, Networks, System};
 use serde_json::{json, Value};
 use std::{
     sync::Mutex,
@@ -12,6 +12,7 @@ struct State {
     nets: Networks,
     nets_listed: Instant,
     comps: Components,
+    disks: Disks,
     last: Option<(Instant, u64, u64)>,
 }
 
@@ -47,6 +48,7 @@ pub fn snapshot() -> Value {
             nets: Networks::new_with_refreshed_list(),
             nets_listed: Instant::now(),
             comps: Components::new_with_refreshed_list(),
+            disks: Disks::new_with_refreshed_list(),
             last: None,
         }
     });
@@ -59,6 +61,19 @@ pub fn snapshot() -> Value {
         st.nets.refresh();
     }
     st.comps.refresh();
+    st.disks.refresh();
+    // System drive: C: on Windows, the data volume on macOS.
+    let sys_mount = if cfg!(windows) {
+        format!("{}\\", std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_owned()))
+    } else {
+        "/System/Volumes/Data".to_owned()
+    };
+    let disk = st
+        .disks
+        .iter()
+        .find(|d| d.mount_point().to_string_lossy().eq_ignore_ascii_case(&sys_mount))
+        .or_else(|| st.disks.iter().find(|d| d.mount_point() == std::path::Path::new("/")))
+        .map(|d| (d.available_space(), d.total_space()));
     let (rx, tx) = st
         .nets
         .iter()
@@ -91,5 +106,7 @@ pub fn snapshot() -> Value {
         "rx": rx_s,
         "tx": tx_s,
         "temp": temp.map(|t| round1(t as f64)),
+        "disk_free": disk.map(|d| d.0),
+        "disk_total": disk.map(|d| d.1),
     })
 }

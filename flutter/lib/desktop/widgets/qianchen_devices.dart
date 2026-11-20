@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
@@ -370,6 +371,10 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
   // LAN addresses that actually answered on the direct port (21118) from here.
   final Map<String, bool> _lanOk = {};
   String _myPublicIp = '';
+  // Thumbnail view: on/off (remembered) and the latest JPEG per device.
+  bool _grid = bind.getLocalFlutterOption(k: 'qc-grid-view') == 'Y';
+  final Map<String, ({int t, Uint8List jpg})> _thumbs = {};
+  Timer? _thumbTimer;
   List<String> _myLanIps = [];
   int _tick = 0;
 
@@ -413,12 +418,14 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
       _queryOnlines();
       _fetchIps();
     });
+    if (_grid) _startThumbs();
   }
 
   @override
   void dispose() {
     platformFFI.unregisterEventHandler('callback_query_onlines', _handlerName);
     _timer?.cancel();
+    _thumbTimer?.cancel();
     _loginWorker?.dispose();
     _search.dispose();
     super.dispose();
@@ -563,6 +570,77 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
 
   String _publicIp(Peer p) => _ips[p.id]?['ip']?.toString() ?? '';
 
+  /// "3 分钟前在线" style text for an offline device, from the server's last heartbeat.
+  String _lastSeen(Peer p) {
+    final last = (_ips[p.id]?['last'] as num?)?.toInt() ?? 0;
+    if (last <= 0) return '';
+    final t = DateTime.fromMillisecondsSinceEpoch(last * 1000);
+    final d = DateTime.now().difference(t);
+    String two(int v) => v.toString().padLeft(2, '0');
+    final hm = '${two(t.hour)}:${two(t.minute)}';
+    final String when;
+    if (d.inMinutes < 1) {
+      when = translate('qc-just-now');
+    } else if (d.inMinutes < 60) {
+      when = '${d.inMinutes} ${translate('qc-minutes-ago')}';
+    } else if (d.inHours < 24 && t.day == DateTime.now().day) {
+      when = '${d.inHours} ${translate('qc-hours-ago')}';
+    } else if (d.inDays < 2 &&
+        DateTime.now().subtract(const Duration(days: 1)).day == t.day) {
+      when = '${translate('qc-yesterday')} $hm';
+    } else {
+      when = '${t.month}-${t.day} $hm';
+    }
+    return '$when${translate('qc-was-online')}';
+  }
+
+  /// Our endpoints on the server (/qc-api/...), signed in as the current account.
+  Future<dynamic> _qcApi(String path, {Map<String, dynamic>? body}) async {
+    final api = await bind.mainGetApiServer();
+    final headers = getHttpHeaders();
+    headers['Content-Type'] = 'application/json';
+    final uri = Uri.parse('$api/qc-api/$path');
+    final resp = body == null
+        ? await http.get(uri, headers: headers)
+        : await http.post(uri, headers: headers, body: jsonEncode(body));
+    final r = jsonDecode(decode_http_response(resp));
+    if (r is Map && r['code'] == 0) return r['data'];
+    throw (r is Map ? r['message'] : null) ?? 'HTTP ${resp.statusCode}';
+  }
+
+  void _setGrid(bool on) {
+    setState(() => _grid = on);
+    bind.setLocalFlutterOption(k: 'qc-grid-view', v: on ? 'Y' : '');
+    _thumbTimer?.cancel();
+    if (on) _startThumbs();
+  }
+
+  void _startThumbs() {
+    _fetchThumbs();
+    _thumbTimer = Timer.periodic(const Duration(seconds: 10), (_) => _fetchThumbs());
+  }
+
+  /// Online devices send a fresh screenshot within ~20 s of being asked.
+  Future<void> _fetchThumbs() async {
+    if (!_grid || !gFFI.userModel.isLogin) return;
+    final ids = _myDevices().where(_isOnline).map((e) => e.id).toList();
+    if (ids.isEmpty) return;
+    try {
+      final data = await _qcApi('thumbs?ids=${ids.join(',')}');
+      if (data is! Map || !mounted) return;
+      var changed = false;
+      data.forEach((id, v) {
+        final t = (v['t'] as num?)?.toInt() ?? 0;
+        if (_thumbs[id]?.t == t) return;
+        _thumbs[id] = (t: t, jpg: base64Decode(v['jpg'] as String));
+        changed = true;
+      });
+      if (changed) setState(() {});
+    } catch (e) {
+      debugPrint('thumbs: $e');
+    }
+  }
+
   /// LAN address to show: the one on our own subnet if there is one.
   String _lanIp(Peer p) {
     var raw = _ips[p.id]?['lan']?.toString() ?? '';
@@ -627,6 +705,7 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
         final all = [...mine, ...recent];
         Peer? selected = all.firstWhereOrNull((p) => p.id == _selectedId);
         selected ??= all.isNotEmpty ? all.first : null;
+        if (_grid && loggedIn) return _buildGrid(context, mine, tags);
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -655,7 +734,38 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(children: [
+        _buildToolbar(mine),
+        Expanded(
+          child: ListView(
+            children: [
+              _sectionHeader(
+                  context,
+                  loggedIn
+                      ? '${translate('My devices')} ($onlineCount/${abPeers.length})'
+                      : translate('My devices'),
+                  expanded: true),
+              if (loggedIn && tags.isNotEmpty) _buildTags(context, tags),
+              if (!loggedIn) _buildLoginHint(context),
+              if (loggedIn && abPeers.isEmpty)
+                _hint(context, translate('qc-no-devices-tip')),
+              ...mine.map((p) => _buildItem(context, p, p.id == selectedId)),
+              if (recent.isNotEmpty)
+                _sectionHeader(
+                    context, '${translate('Recent sessions')} (${recent.length})',
+                    expanded: recentExpanded,
+                    onTap: () =>
+                        setState(() => _recentExpanded = !recentExpanded)),
+              if (recentExpanded)
+                ...recent.map((p) => _buildItem(context, p, p.id == selectedId)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildToolbar(List<Peer> mine) {
+    return Row(children: [
           Expanded(
             child: SizedBox(
               height: 36,
@@ -686,53 +796,179 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
               _fetchIps();
             },
           ),
-          PopupMenuButton<String>(
-            tooltip: translate('qc-batch'),
-            icon: const Icon(Icons.checklist_rounded, size: 20),
-            enabled: mine.isNotEmpty,
-            onSelected: (v) => _batch(mine, shutdown: v == 'shutdown'),
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                  value: 'shutdown',
-                  child: Text(translate('qc-batch-shutdown'))),
-              PopupMenuItem(
-                  value: 'wake', child: Text(translate('qc-batch-wake'))),
-            ],
-          ),
           IconButton(
-            tooltip: translate('Classic view'),
-            icon: const Icon(Icons.view_list_rounded, size: 20),
-            onPressed: widget.onShowClassic,
+            tooltip: translate(_grid ? 'qc-list-view' : 'qc-grid-view'),
+            icon: Icon(
+                _grid ? Icons.view_agenda_outlined : Icons.grid_view_rounded,
+                size: 20),
+            onPressed: () => _setGrid(!_grid),
           ),
-        ]).paddingOnly(left: 4, right: 4, top: 10, bottom: 6),
-        Expanded(
-          child: ListView(
-            children: [
-              _sectionHeader(
-                  context,
-                  loggedIn
-                      ? '${translate('My devices')} ($onlineCount/${abPeers.length})'
-                      : translate('My devices'),
-                  expanded: true),
-              if (loggedIn && tags.isNotEmpty) _buildTags(context, tags),
-              if (!loggedIn) _buildLoginHint(context),
-              if (loggedIn && abPeers.isEmpty)
-                _hint(context, translate('qc-no-devices-tip')),
-              ...mine.map((p) => _buildItem(context, p, p.id == selectedId)),
-              if (recent.isNotEmpty)
-                _sectionHeader(
-                    context, '${translate('Recent sessions')} (${recent.length})',
-                    expanded: recentExpanded,
-                    onTap: () =>
-                        setState(() => _recentExpanded = !recentExpanded)),
-              if (recentExpanded)
-                ...recent.map((p) => _buildItem(context, p, p.id == selectedId)),
-            ],
+          _moreMenu(mine),
+        ]).paddingOnly(left: 4, right: 4, top: 10, bottom: 6);
+  }
+
+  /// Thumbnail view: a card per device with its latest screen.
+  Widget _buildGrid(BuildContext context, List<Peer> mine, List<String> tags) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(children: [
+        Expanded(child: tags.isEmpty ? const SizedBox.shrink() : _buildTags(context, tags)),
+        SizedBox(width: 420, child: _buildToolbar(mine)),
+      ]),
+      Expanded(
+        child: mine.isEmpty
+            ? _hint(context, translate('qc-no-devices-tip'))
+            : GridView.extent(
+                maxCrossAxisExtent: 300,
+                childAspectRatio: 1.25,
+                mainAxisSpacing: 14,
+                crossAxisSpacing: 14,
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+                children: mine.map((p) => _buildCard(context, p)).toList(),
+              ),
+      ),
+    ]);
+  }
+
+  Widget _buildCard(BuildContext context, Peer p) {
+    final online = _isOnline(p);
+    final muted = Theme.of(context).textTheme.bodySmall?.color;
+    final thumb = _thumbs[p.id];
+    final hover = false.obs;
+    Widget screen;
+    if (online && thumb != null) {
+      screen = Image.memory(thumb.jpg,
+          fit: BoxFit.cover, gaplessPlayback: true, width: double.infinity);
+    } else {
+      screen = Container(
+        color: online
+            ? MyTheme.accent.withOpacity(0.08)
+            : Colors.grey.withOpacity(0.12),
+        alignment: Alignment.center,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(online ? Icons.hourglass_top_rounded : Icons.power_settings_new_rounded,
+              size: 28, color: online ? MyTheme.accent : Colors.grey),
+          const SizedBox(height: 6),
+          Text(online ? translate('qc-thumb-loading') : _lastSeen(p),
+              style: TextStyle(fontSize: 12, color: muted)),
+        ]),
+      );
+    }
+    Widget action(IconData icon, String tip, VoidCallback onTap) => Tooltip(
+          message: translate(tip),
+          child: Material(
+            color: Colors.black.withOpacity(0.55),
+            shape: const CircleBorder(),
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: onTap,
+              child: Icon(icon, size: 18, color: Colors.white).paddingAll(8),
+            ),
           ),
+        );
+    return MouseRegion(
+      onEnter: (_) => hover.value = true,
+      onExit: (_) => hover.value = false,
+      child: Material(
+        color: Theme.of(context).cardColor,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: BorderSide(color: Theme.of(context).dividerColor.withOpacity(0.6))),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => connect(context, p.id),
+          onSecondaryTapDown: (d) {
+            _select(p.id);
+            _showItemMenu(context, p, d.globalPosition);
+          },
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Expanded(
+              child: Stack(fit: StackFit.expand, children: [
+                screen,
+                Obx(() => AnimatedOpacity(
+                      opacity: hover.value ? 1 : 0,
+                      duration: const Duration(milliseconds: 150),
+                      child: Align(
+                        alignment: Alignment.bottomRight,
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          action(Icons.drive_file_move_rounded, 'File transfer',
+                              () => connect(context, p.id, isFileTransfer: true)),
+                          const SizedBox(width: 6),
+                          action(Icons.info_outline_rounded, 'qc-show-detail', () {
+                            _select(p.id);
+                            _setGrid(false);
+                          }),
+                        ]).paddingAll(8),
+                      ),
+                    )),
+              ]),
+            ),
+            Row(children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: online ? const Color(0xFF1E9E63) : Colors.grey),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(_name(p),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              ),
+              Text(formatID(p.id), style: TextStyle(fontSize: 11, color: muted)),
+            ]).paddingSymmetric(horizontal: 12, vertical: 10),
+          ]),
         ),
-      ],
+      ),
     );
   }
+
+  Widget _moreMenu(List<Peer> mine) => PopupMenuButton<String>(
+        tooltip: translate('More'),
+        icon: const Icon(Icons.more_vert_rounded, size: 20),
+        onSelected: (v) {
+          switch (v) {
+            case 'shutdown':
+            case 'wake':
+              _batch(mine, shutdown: v == 'shutdown');
+              break;
+            case 'schedule':
+              _editSchedules();
+              break;
+            case 'alerts':
+              _editAlerts();
+              break;
+            case 'classic':
+              widget.onShowClassic();
+              break;
+          }
+        },
+        itemBuilder: (_) => [
+          PopupMenuItem(
+              value: 'shutdown',
+              enabled: mine.isNotEmpty,
+              child: Text(translate('qc-batch-shutdown'))),
+          PopupMenuItem(
+              value: 'wake',
+              enabled: mine.isNotEmpty,
+              child: Text(translate('qc-batch-wake'))),
+          const PopupMenuDivider(),
+          PopupMenuItem(
+              value: 'schedule',
+              enabled: gFFI.userModel.isLogin,
+              child: Text(translate('qc-schedule'))),
+          PopupMenuItem(
+              value: 'alerts',
+              enabled: gFFI.userModel.isLogin,
+              child: Text(translate('qc-alerts'))),
+          const PopupMenuDivider(),
+          PopupMenuItem(
+              value: 'classic', child: Text(translate('Classic view'))),
+        ],
+      );
 
   Widget _buildTags(BuildContext context, List<String> tags) {
     Widget chip(String label, String value, Color? color) {
@@ -917,8 +1153,9 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
   Widget _buildItem(BuildContext context, Peer p, bool selected) {
     final online = _isOnline(p);
     final muted = Theme.of(context).textTheme.bodySmall?.color;
-    final isLan = _isLan(p);
-    final ip = isLan ? _lanIp(p) : _publicIp(p);
+    final isLan = online && _isLan(p);
+    final seen = online ? '' : _lastSeen(p);
+    final ip = seen.isNotEmpty ? seen : (isLan ? _lanIp(p) : _publicIp(p));
     return Material(
       color: selected ? MyTheme.accent.withOpacity(0.11) : Colors.transparent,
       borderRadius: BorderRadius.circular(12),
@@ -1125,7 +1362,12 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
                   if (_isSelf(p))
                     _chip(translate('qc-this-device'), const Color(0xFFC77A12),
                         icon: Icons.person_pin_circle_rounded),
-                  _chip(online ? translate('Online') : translate('Offline'),
+                  _chip(
+                      online
+                          ? translate('Online')
+                          : [translate('Offline'), _lastSeen(p)]
+                              .where((e) => e.isNotEmpty)
+                              .join(' · '),
                       online ? const Color(0xFF1E9E63) : Colors.grey),
                   if (isLan)
                     _chip(translate('qc-lan'), MyTheme.accent,
@@ -1447,6 +1689,204 @@ class _QianchenDevicesPanelState extends State<QianchenDevicesPanel> {
       debugPrint('peer-cmd: $e');
       return 'skip';
     }
+  }
+
+  /// Scheduled power on / off per tag ("*" = every device). Runs on the server.
+  Future<void> _editSchedules() async {
+    Map data;
+    try {
+      data = (await _qcApi('schedule')) as Map? ?? {};
+    } catch (e) {
+      showToast('$e');
+      return;
+    }
+    final groups = ['*', ...gFFI.abModel.currentAbTags.toList()];
+    final cfg = <String, Map<String, dynamic>>{
+      for (final g in groups)
+        g: {
+          'enabled': data[g]?['enabled'] == true,
+          'on': data[g]?['on'] ?? '',
+          'off': data[g]?['off'] ?? '',
+          'days': List<int>.from(data[g]?['days'] ?? [1, 2, 3, 4, 5, 6, 7]),
+        }
+    };
+    final times = [
+      '',
+      for (var h = 0; h < 24; h++)
+        for (final m in ['00', '30']) '${h.toString().padLeft(2, '0')}:$m'
+    ];
+    const dayNames = ['一', '二', '三', '四', '五', '六', '日'];
+    gFFI.dialogManager.show((setState, close, context) {
+      Widget timeBox(String g, String key) => DropdownButton<String>(
+            value: cfg[g]![key] as String,
+            isDense: true,
+            items: times
+                .map((t) => DropdownMenuItem(
+                    value: t,
+                    child: Text(t.isEmpty ? translate('qc-not-set') : t,
+                        style: const TextStyle(fontSize: 13))))
+                .toList(),
+            onChanged: (v) => setState(() => cfg[g]![key] = v ?? ''),
+          );
+      Widget row(String g) {
+        final c = cfg[g]!;
+        final days = c['days'] as List<int>;
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.fromLTRB(4, 4, 10, 8),
+          decoration: BoxDecoration(
+            color: Theme.of(context).hoverColor.withOpacity(0.4),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Checkbox(
+                  value: c['enabled'] as bool,
+                  onChanged: (v) => setState(() => c['enabled'] = v == true)),
+              Text(g == '*' ? translate('qc-all-devices') : g,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              const Spacer(),
+              Text('${translate('qc-power-on-at')} ', style: const TextStyle(fontSize: 13)),
+              timeBox(g, 'on'),
+              const SizedBox(width: 14),
+              Text('${translate('qc-power-off-at')} ', style: const TextStyle(fontSize: 13)),
+              timeBox(g, 'off'),
+            ]),
+            Wrap(spacing: 4, children: [
+              for (var d = 1; d <= 7; d++)
+                FilterChip(
+                  label: Text('周${dayNames[d - 1]}', style: const TextStyle(fontSize: 12)),
+                  visualDensity: VisualDensity.compact,
+                  selected: days.contains(d),
+                  selectedColor: MyTheme.accent.withOpacity(0.18),
+                  showCheckmark: false,
+                  onSelected: (on) => setState(() => on ? days.add(d) : days.remove(d)),
+                ),
+            ]).paddingOnly(left: 12),
+          ]),
+        );
+      }
+
+      submit() async {
+        try {
+          await _qcApi('schedule', body: {'schedules': cfg});
+          close();
+          showToast(translate('Successful'));
+        } catch (e) {
+          showToast('$e');
+        }
+      }
+
+      return CustomAlertDialog(
+        title: Text(translate('qc-schedule')),
+        content: SizedBox(
+          width: 560,
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(translate('qc-schedule-tip'),
+                style: TextStyle(fontSize: 12, color: Theme.of(context).textTheme.bodySmall?.color)),
+            const SizedBox(height: 10),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 420),
+              child: SingleChildScrollView(child: Column(children: groups.map(row).toList())),
+            ),
+          ]),
+        ),
+        actions: [
+          dialogButton('Cancel', onPressed: close, isOutline: true),
+          dialogButton('OK', onPressed: submit),
+        ],
+        onCancel: close,
+        onSubmit: submit,
+      );
+    });
+  }
+
+  /// WeChat alerts through PushPlus or Server酱; sent by the server.
+  Future<void> _editAlerts() async {
+    Map data;
+    try {
+      data = (await _qcApi('alerts')) as Map? ?? {};
+    } catch (e) {
+      showToast('$e');
+      return;
+    }
+    var provider = data['provider'] == 'serverchan' ? 'serverchan' : 'pushplus';
+    final token = TextEditingController(text: data['token']?.toString() ?? '');
+    final opts = {
+      'offline': data.isEmpty || data['offline'] == true,
+      'cpu': data.isEmpty || data['cpu'] == true,
+      'disk': data.isEmpty || data['disk'] == true,
+    };
+    Map<String, dynamic> body() =>
+        {'provider': provider, 'token': token.text.trim(), ...opts};
+    gFFI.dialogManager.show((setState, close, context) {
+      final muted = Theme.of(context).textTheme.bodySmall?.color;
+      submit() async {
+        try {
+          await _qcApi('alerts', body: body());
+          close();
+          showToast(translate('Successful'));
+        } catch (e) {
+          showToast('$e');
+        }
+      }
+
+      Widget check(String key, String label) => CheckboxListTile(
+            value: opts[key],
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: Text(translate(label), style: const TextStyle(fontSize: 13)),
+            onChanged: (v) => setState(() => opts[key] = v == true),
+          );
+      return CustomAlertDialog(
+        title: Text(translate('qc-alerts')),
+        content: SizedBox(
+          width: 460,
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              ChoiceChip(
+                  label: const Text('PushPlus'),
+                  selected: provider == 'pushplus',
+                  onSelected: (_) => setState(() => provider = 'pushplus')),
+              const SizedBox(width: 8),
+              ChoiceChip(
+                  label: const Text('Server酱'),
+                  selected: provider == 'serverchan',
+                  onSelected: (_) => setState(() => provider = 'serverchan')),
+            ]),
+            const SizedBox(height: 6),
+            Text(translate(provider == 'pushplus' ? 'qc-pushplus-tip' : 'qc-serverchan-tip'),
+                style: TextStyle(fontSize: 12, color: muted)),
+            const SizedBox(height: 8),
+            TextField(
+              controller: token,
+              decoration: InputDecoration(
+                  isDense: true,
+                  hintText: translate(provider == 'pushplus' ? 'qc-pushplus-token' : 'qc-serverchan-key')),
+            ),
+            const SizedBox(height: 10),
+            check('offline', 'qc-alert-offline'),
+            check('cpu', 'qc-alert-cpu'),
+            check('disk', 'qc-alert-disk'),
+          ]),
+        ),
+        actions: [
+          dialogButton('qc-send-test', isOutline: true, onPressed: () async {
+            try {
+              await _qcApi('alerts/test', body: body());
+              showToast(translate('qc-test-sent'));
+            } catch (e) {
+              showToast('$e');
+            }
+          }),
+          dialogButton('Cancel', onPressed: close, isOutline: true),
+          dialogButton('OK', onPressed: submit),
+        ],
+        onCancel: close,
+        onSubmit: submit,
+      );
+    });
   }
 
   /// Remark name (alias) for any device; the note is kept in the address book.
