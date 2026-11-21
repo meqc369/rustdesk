@@ -52,6 +52,9 @@ fn connection_meta(
 // Relays this peer put in its punch replies, from its `relay-server` option or a rendezvous
 // server. A genuine RequestRelay echoes one back; this bounds where a request can send this peer,
 // it does not authenticate the request.
+// 千尘desk: set once UDP 21116 got no answer for a while (e.g. a global VPN whose node drops UDP);
+// from then on this process registers over TCP 21116 instead.
+static QC_UDP_GAVE_UP: AtomicBool = AtomicBool::new(false);
 static REPORTED_RELAYS: std::sync::Mutex<VecDeque<(String, Instant)>> =
     std::sync::Mutex::new(VecDeque::new());
 const MAX_REPORTED_RELAYS: usize = 32;
@@ -501,6 +504,10 @@ impl RendezvousMediator {
                     if timeout || (last_register_sent.is_none() && expired) {
                         if timeout {
                             fails += 1;
+                            if fails >= 8 {
+                                QC_UDP_GAVE_UP.store(true, Ordering::SeqCst);
+                                bail!("no answer over UDP, switching to TCP");
+                            }
                             if fails >= MAX_FAILS2 {
                                 Config::update_latency(&host, -1);
                                 old_latency = 0;
@@ -695,6 +702,7 @@ impl RendezvousMediator {
             || Config::is_proxy()
             || use_ws()
             || crate::is_udp_disabled()
+            || QC_UDP_GAVE_UP.load(Ordering::SeqCst)
         {
             Self::start_tcp(server, host).await
         } else {
